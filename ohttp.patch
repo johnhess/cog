@@ -1,20 +1,21 @@
 diff --git a/components/cronet/BUILD.gn b/components/cronet/BUILD.gn
-index 92350cf3b4b77..685dd0a147bca 100644
+index 92350cf3b4b77..cf15c3fda0faf 100644
 --- a/components/cronet/BUILD.gn
 +++ b/components/cronet/BUILD.gn
-@@ -275,6 +275,7 @@ if (is_android) {
+@@ -275,6 +275,8 @@ if (is_android) {
      deps = [
        "//components/cronet",
        "//components/cronet/native:cronet_native_headers",
 +      "//third_party/boringssl",
++      "//third_party/ohttp",
      ]
      if ((is_linux || is_chromeos) && !is_component_build) {
        public_configs = [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
 diff --git a/components/cronet/native/sample/main.cc b/components/cronet/native/sample/main.cc
-index 007d5bbab90d7..7c1548ffe64bb 100644
+index 007d5bbab90d7..64e0b7453ec6d 100644
 --- a/components/cronet/native/sample/main.cc
 +++ b/components/cronet/native/sample/main.cc
-@@ -3,46 +3,34 @@
+@@ -3,55 +3,32 @@
  // found in the LICENSE file.
  
  #include <iostream>
@@ -23,26 +24,22 @@ index 007d5bbab90d7..7c1548ffe64bb 100644
 +#include <cstdint>
  
  #include "cronet_c.h"
++#include "openssl/evp.h"
  #include "sample_executor.h"
  #include "sample_url_request_callback.h"
 +#include "third_party/boringssl/src/include/openssl/hpke.h"
++#include "third_party/ohttp/ohttp.h"
  
- Cronet_EnginePtr CreateCronetEngine() {
-   Cronet_EnginePtr cronet_engine = Cronet_Engine_Create();
-   Cronet_EngineParamsPtr engine_params = Cronet_EngineParams_Create();
-   Cronet_EngineParams_user_agent_set(engine_params, "CronetSample/1");
+-Cronet_EnginePtr CreateCronetEngine() {
+-  Cronet_EnginePtr cronet_engine = Cronet_Engine_Create();
+-  Cronet_EngineParamsPtr engine_params = Cronet_EngineParams_Create();
+-  Cronet_EngineParams_user_agent_set(engine_params, "CronetSample/1");
  
 -  Cronet_EngineParams_envoy_url_set(engine_params,
 -                                    "https://example.com/enovy_path/");
-+  // Standard HTTPS Proxy using Envoy's ansible roles.
-+  // Cronet_EngineParams_envoy_url_set(
-+  //     engine_params,
-+  //     "envoy://"
-+  //     "?url=https%3A%2F%2Fenvoy-proxies.jthess.com%2Fenvoy_proxy_path%2F&header_Host="
-+  //     "ohttp-gateway.jthess.com");
-   Cronet_EngineParams_envoy_url_set(
-       engine_params,
-       "envoy://"
+-  Cronet_EngineParams_envoy_url_set(
+-      engine_params,
+-      "envoy://"
 -      "?url=https%3A%2F%2Fexample.com%2Fenvoy_path%2F%3Fk1%3Dv1&header_Host="
 -      "subdomain.example.com&resolve=MAP%20example.com%201.2.3.4");
 -  // only MAP url-host to address
@@ -68,46 +65,99 @@ index 007d5bbab90d7..7c1548ffe64bb 100644
 -      "envoy://"
 -      "?url=https%3A%2F%2Frayon.example.com%2Fwikipedia%2F&address=142.65.13.41"
 -      "&header_Host=abc.example.com&socks5=socks5%3A%2F%2Flocalhost%3A8192");
-+      "?url=https%3A%2F%2Fohttp-relay.jthess.com" // Relay
-+      "&ohttp=1" // Flag to indicate this is an ohttp relay
-+      "&ohttp_gateway=ohttp-gateway.jthess.com/gog/gateway"
-+      "&ohttp_config=ohttp-gateway.jthess.com/gog/ohttp-keys"
-+  );
-  
-   Cronet_EngineParams_enable_quic_set(engine_params, true);
+- 
+-  Cronet_EngineParams_enable_quic_set(engine_params, true);
  
-@@ -68,10 +56,11 @@ void PerformRequest(Cronet_EnginePtr cronet_engine,
+-  Cronet_Engine_StartWithParams(cronet_engine, engine_params);
+-  Cronet_EngineParams_Destroy(engine_params);
+-  return cronet_engine;
++// Function to base64 encode
++std::string base64_encode(const std::string& input) {
++    size_t output_length = 4 * ((input.size() + 2) / 3);
++    std::string encoded(output_length, '\0');
++    
++    int actual_length = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(&encoded[0]),
++                                        reinterpret_cast<const unsigned char*>(input.data()),
++                                        input.size());
++    encoded.resize(actual_length);  // Trim to actual length
++    return encoded;
+ }
+ 
+-void PerformRequest(Cronet_EnginePtr cronet_engine,
++std::string GetResponseBody(Cronet_EnginePtr cronet_engine,
+                     const std::string& url,
+                     Cronet_ExecutorPtr executor) {
+   SampleUrlRequestCallback url_request_callback;
+@@ -68,8 +45,42 @@ void PerformRequest(Cronet_EnginePtr cronet_engine,
    url_request_callback.WaitForDone();
    Cronet_UrlRequest_Destroy(request);
  
 -  std::cout << "Response Data:" << std::endl
-+  std::cout << "Response To Caller:" << std::endl
-             << url_request_callback.response_as_string() << std::endl;
+-            << url_request_callback.response_as_string() << std::endl;
++  return url_request_callback.response_as_string();
++}
++
++Cronet_EnginePtr CreateCronetEngine() {
++  Cronet_EnginePtr cronet_engine = Cronet_Engine_Create();
++  Cronet_EngineParamsPtr engine_params = Cronet_EngineParams_Create();
++  Cronet_EngineParams_user_agent_set(engine_params, "CronetSample/1");
++
++  // Get the OHTTP config for use in our envoy URL.
++  Cronet_Engine_StartWithParams(cronet_engine, engine_params);
++  SampleExecutor executor;
++  std::string config = GetResponseBody(cronet_engine, "https://ohttp-gateway.jthess.com/gog/ohttp-keys", executor.GetExecutor());
++  std::string config_as_base64 = base64_encode(config);
++  Cronet_Engine_Shutdown(cronet_engine);
++
++  std::string envoy_url = "envoy://"
++      "?url=https%3A%2F%2Fohttp-relay.jthess.com" // Relay
++      "&ohttp=1" // Flag to indicate this is an ohttp relay
++      "&ohttp_gateway=ohttp-gateway.jthess.com/gog/gateway"
++      "&ohttp_config=";
++  
++  envoy_url = envoy_url + config_as_base64;
++  Cronet_EngineParams_envoy_url_set(engine_params, envoy_url.c_str());  
++  Cronet_EngineParams_enable_quic_set(engine_params, true);
++
++  Cronet_Engine_StartWithParams(cronet_engine, engine_params);
++  Cronet_EngineParams_Destroy(engine_params);
++  // Use that engine to get the OHTTP config.
++  return cronet_engine;
++}
++
++void PerformRequest(Cronet_EnginePtr cronet_engine,
++                    const std::string& url,
++                    Cronet_ExecutorPtr executor) {
++  std::string response = GetResponseBody(cronet_engine, url, executor);
++  std::cout << "Response to caller: " << std::endl << std::endl << response << std::endl;
  }
  
-+
  // Download a resource from the Internet. Optional argument must specify
- // a valid URL.
+@@ -77,11 +88,11 @@ void PerformRequest(Cronet_EnginePtr cronet_engine,
  int main(int argc, const char* argv[]) {
-@@ -80,7 +69,7 @@ int main(int argc, const char* argv[]) {
-   std::cout << "Cronet version: "
+   std::cout << "Hello from Cronet!\n";
+   Cronet_EnginePtr cronet_engine = CreateCronetEngine();
+-  std::cout << "Cronet version: "
++  std::cout << "  Cronet version: "
              << Cronet_Engine_GetVersionString(cronet_engine) << std::endl;
  
 -  std::string url(argc > 1 ? argv[1] : "https://www.google.com/generate_204");
+-  std::cout << "URL: " << url << std::endl;
 +  std::string url(argc > 1 ? argv[1] : "https://www.example.com");
-   std::cout << "URL: " << url << std::endl;
++  std::cout << "  GETting URL: " << url << " via OHTTP" << std::endl;
    SampleExecutor executor;
    PerformRequest(cronet_engine, url, executor.GetExecutor());
+ 
 diff --git a/components/cronet/native/sample/sample_url_request_callback.cc b/components/cronet/native/sample/sample_url_request_callback.cc
-index 396e27dbd27d2..f1693a4d37a04 100644
+index 396e27dbd27d2..6e3ca7f3752ca 100644
 --- a/components/cronet/native/sample/sample_url_request_callback.cc
 +++ b/components/cronet/native/sample/sample_url_request_callback.cc
-@@ -29,15 +29,15 @@ void SampleUrlRequestCallback::OnRedirectReceived(
+@@ -29,17 +29,17 @@ void SampleUrlRequestCallback::OnRedirectReceived(
      Cronet_UrlRequestPtr request,
      Cronet_UrlResponseInfoPtr info,
      Cronet_String newLocationUrl) {
 -  std::cout << "OnRedirectReceived called: " << newLocationUrl << std::endl;
-+  std::cout << "SampleUrlRequestCallback::OnRedirectReceived called: " << newLocationUrl << std::endl;
++  // std::cout << "SampleUrlRequestCallback::OnRedirectReceived called: " << newLocationUrl << std::endl;
    Cronet_UrlRequest_FollowRedirect(request);
  }
  
@@ -116,29 +166,34 @@ index 396e27dbd27d2..f1693a4d37a04 100644
      Cronet_UrlResponseInfoPtr info) {
 -  std::cout << "OnResponseStarted called." << std::endl;
 -  std::cout << "HTTP Status: "
-+  std::cout << "SampleUrlRequestCallback::OnResponseStarted called." << std::endl;
-+  std::cout << "HTTP Status: " << std::dec
-             << Cronet_UrlResponseInfo_http_status_code_get(info) << " "
-             << Cronet_UrlResponseInfo_http_status_text_get(info) << std::endl;
+-            << Cronet_UrlResponseInfo_http_status_code_get(info) << " "
+-            << Cronet_UrlResponseInfo_http_status_text_get(info) << std::endl;
++  // std::cout << "SampleUrlRequestCallback::OnResponseStarted called." << std::endl;
++  // std::cout << "HTTP Status to Caller: " << std::dec
++            // << Cronet_UrlResponseInfo_http_status_code_get(info) << " "
++            // << Cronet_UrlResponseInfo_http_status_text_get(info) << std::endl;
    // Create and allocate 32kb buffer.
-@@ -51,25 +51,21 @@ void SampleUrlRequestCallback::OnReadCompleted(Cronet_UrlRequestPtr request,
+   Cronet_BufferPtr buffer = Cronet_Buffer_Create();
+   Cronet_Buffer_InitWithAlloc(buffer, 32 * 1024);
+@@ -51,8 +51,10 @@ void SampleUrlRequestCallback::OnReadCompleted(Cronet_UrlRequestPtr request,
                                                 Cronet_UrlResponseInfoPtr info,
                                                 Cronet_BufferPtr buffer,
                                                 uint64_t bytes_read) {
 -  std::cout << "OnReadCompleted called: " << bytes_read << " bytes read."
-+  std::cout << "SampleUrlRequestCallback::OnReadCompleted called: " << bytes_read << " bytes read."
-             << std::endl;
--  std::string last_read_data(
--      reinterpret_cast<char*>(Cronet_Buffer_GetData(buffer)), bytes_read);
--  response_as_string_ += last_read_data;
--  // Continue reading the response.
-   Cronet_UrlRequest_Read(request, buffer);
- }
+-            << std::endl;
++  // std::cout << "SampleUrlRequestCallback::OnReadCompleted called: " << bytes_read << " bytes read."
++            // << std::endl;
++  // It's possible that the data's not ready yet so it hasn't been decapsulated.
++  // If that's true, we need to deal with that.
+   std::string last_read_data(
+       reinterpret_cast<char*>(Cronet_Buffer_GetData(buffer)), bytes_read);
+   response_as_string_ += last_read_data;
+@@ -62,22 +64,22 @@ void SampleUrlRequestCallback::OnReadCompleted(Cronet_UrlRequestPtr request,
  
  void SampleUrlRequestCallback::OnSucceeded(Cronet_UrlRequestPtr request,
                                             Cronet_UrlResponseInfoPtr info) {
 -  std::cout << "OnSucceeded called." << std::endl;
-+  std::cout << "SampleUrlRequestCallback::OnSucceeded called." << std::endl;
++  // std::cout << "SampleUrlRequestCallback::OnSucceeded called." << std::endl;
    SignalDone(true);
  }
  
@@ -146,10 +201,20 @@ index 396e27dbd27d2..f1693a4d37a04 100644
                                          Cronet_UrlResponseInfoPtr info,
                                          Cronet_ErrorPtr error) {
 -  std::cout << "OnFailed called: " << Cronet_Error_message_get(error)
-+  std::cout << "SampleUrlRequestCallback::OnFailed called: " << Cronet_Error_message_get(error)
-             << std::endl;
+-            << std::endl;
++  // std::cout << "SampleUrlRequestCallback::OnFailed called: " << Cronet_Error_message_get(error)
++            // << std::endl;
    last_error_message_ = Cronet_Error_message_get(error);
    SignalDone(false);
+ }
+ 
+ void SampleUrlRequestCallback::OnCanceled(Cronet_UrlRequestPtr request,
+                                           Cronet_UrlResponseInfoPtr info) {
+-  std::cout << "OnCanceled called." << std::endl;
++  // std::cout << "OnCanceled called." << std::endl;
+   SignalDone(false);
+ }
+ 
 diff --git a/components/cronet/native/sample/test/sample_test.cc b/components/cronet/native/sample/test/sample_test.cc
 index 7831b69f72a4a..ee0e6167ada44 100644
 --- a/components/cronet/native/sample/test/sample_test.cc
@@ -176,7 +241,7 @@ index e12e5b6936b8d..bbd05f79d0072 100644
  
    allow_circular_includes_from = [
 diff --git a/net/url_request/url_request_context_builder.cc b/net/url_request/url_request_context_builder.cc
-index b3b5b9da8f5ae..23a3a86673ec9 100644
+index b3b5b9da8f5ae..552acc549a6f4 100644
 --- a/net/url_request/url_request_context_builder.cc
 +++ b/net/url_request/url_request_context_builder.cc
 @@ -55,6 +55,7 @@
@@ -187,7 +252,7 @@ index b3b5b9da8f5ae..23a3a86673ec9 100644
  #include "url/url_constants.h"
  
  #if BUILDFLAG(ENABLE_REPORTING)
-@@ -286,8 +287,11 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
+@@ -286,8 +287,10 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
    context->set_require_network_isolation_key(require_network_isolation_key_);
    context->set_network_quality_estimator(network_quality_estimator_);
  
@@ -195,12 +260,11 @@ index b3b5b9da8f5ae..23a3a86673ec9 100644
 +  // Give the context the Envoy URL
 +  if (!envoy_url_.empty()) {
      context->set_envoy_url(envoy_url_);
-+    std::cout << "Envoy URL is: " << envoy_url_ << std::endl;
 +  }
    if (http_user_agent_settings_) {
      context->set_http_user_agent_settings(std::move(http_user_agent_settings_));
    } else {
-@@ -380,6 +384,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
+@@ -380,6 +383,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
    // TODO assert value
    auto url = GURL(value);
  
@@ -208,7 +272,7 @@ index b3b5b9da8f5ae..23a3a86673ec9 100644
    if (GetValueForKeyInQuery(envoy_url, "resolve", &value)) {
      std::unique_ptr<net::MappedHostResolver> remapped_resolver(
          new net::MappedHostResolver(std::move(host_resolver_)));
-@@ -399,6 +404,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
+@@ -399,6 +403,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
    } else {
      SSLContextConfig ssl_context_config;
      std::vector<uint16_t> disabled_ciphers;
@@ -217,7 +281,7 @@ index b3b5b9da8f5ae..23a3a86673ec9 100644
        auto cipher_strings = base::SplitString(value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
        // see net::ParseCipherSuites(cipher_strings);
 diff --git a/net/url_request/url_request_http_job.cc b/net/url_request/url_request_http_job.cc
-index da6ee48808da0..be5ef5bfecc00 100644
+index da6ee48808da0..f3816c2146bc3 100644
 --- a/net/url_request/url_request_http_job.cc
 +++ b/net/url_request/url_request_http_job.cc
 @@ -36,6 +36,7 @@
@@ -236,23 +300,42 @@ index da6ee48808da0..be5ef5bfecc00 100644
  #include "net/base/url_util.h"
  #include "net/cert/cert_status_flags.h"
  #include "net/cert/ct_policy_status.h"
-@@ -94,6 +96,7 @@
+@@ -93,7 +95,9 @@
+ #include "net/url_request/url_request_redirect_job.h"
  #include "net/url_request/url_request_throttler_manager.h"
  #include "net/url_request/websocket_handshake_userdata_key.h"
++#include "openssl/evp.h"
  #include "third_party/abseil-cpp/absl/types/optional.h"
 +#include "third_party/ohttp/ohttp.h"
  #include "url/gurl.h"
  #include "url/origin.h"
  #include "url/url_constants.h"
-@@ -538,6 +541,7 @@ void URLRequestHttpJob::MaybeStartTransactionInternal(int result) {
+@@ -189,6 +193,16 @@ GURL UpgradeSchemeToCryptographic(const GURL& insecure_url) {
+   return secure_url;
+ }
+ 
++// For parsing b64 OHTTP config in Envoy URL
++std::vector<uint8_t> base64_decode(const std::string& input) {
++    uint8_t* output = new uint8_t[input.size()];
++    int actual_length = EVP_DecodeBlock(output,
++                                        reinterpret_cast<const unsigned char*>(input.data()),
++                                        input.size());
++    std::vector<uint8_t> decoded(output, output + actual_length);
++    return decoded;
++}
++
+ }  // namespace
+ 
+ namespace net {
+@@ -538,7 +552,6 @@ void URLRequestHttpJob::MaybeStartTransactionInternal(int result) {
  
  void URLRequestHttpJob::StartTransactionInternal() {
    DCHECK(!override_response_headers_);
-+  std::cout << "Trying to hit: " << request_info_.url << std::endl;
- 
+-
    // NOTE: This method assumes that request_info_ is already setup properly.
  
-@@ -560,6 +564,38 @@ void URLRequestHttpJob::StartTransactionInternal() {
+   // If we already have a transaction, then we should restart the transaction
+@@ -560,6 +573,48 @@ void URLRequestHttpJob::StartTransactionInternal() {
    } else {
      DCHECK(request_->context()->http_transaction_factory());
  
@@ -261,22 +344,32 @@ index da6ee48808da0..be5ef5bfecc00 100644
 +      if (request_->context()->envoy_url().rfind("http://", 0) == 0 ||
 +                    request_->context()->envoy_url().rfind("https://", 0) == 0 ||
 +                    request_->context()->envoy_url().rfind("envoy://", 0) == 0) {
-+        // TODO: Override the response since we need to decrypt it
-+        std::cout << "Constructing an HPKE encapsulated binary request" << std::endl;
 +        size_t pkR_len = 32;
-+        // TODO: get the PK from the config
-+        uint8_t pkR[] = {0x69, 0xd7, 0x41, 0x15, 0xc6, 0x55, 0xd3, 0x7c, 0xb5, 0x3b, 0x9a, 0x1a, 0x5a, 0x3b, 0x71, 0x1d, 0xc5, 0x49, 0x56, 0xc3, 0x4e, 0x47, 0x8b, 0xf0, 0x2f, 0x5a, 0xad, 0x4f, 0x02, 0x93, 0x14, 0x18};
++        // Get the OHTTP Config from the Envoy URL
++        size_t ohttp_config_start = request_->context()->envoy_url().find("ohttp_config=");
++        DCHECK(ohttp_config_start != std::string::npos);
++        ohttp_config_start += 13;
++        size_t ohttp_config_end = request_->context()->envoy_url().find("&", ohttp_config_start);
++        if (ohttp_config_end == std::string::npos) {
++          ohttp_config_end = request_->context()->envoy_url().size();
++        }
++        std::string ohttp_config = request_->context()->envoy_url().substr(ohttp_config_start, ohttp_config_end - ohttp_config_start);
++        // base64 decode the envoy config
++        std::vector<uint8_t> envoy_config_decoded = base64_decode(ohttp_config);
++        std::vector<uint8_t> pkR_vec = ohttp::get_public_key(envoy_config_decoded);
++        DCHECK(pkR_vec.size() == pkR_len);
++        uint8_t pkR[pkR_len];
++        std::copy(pkR_vec.begin(), pkR_vec.end(), pkR);
 +        sender_context = ohttp::createHpkeContext();
 +        byte_data = ohttp::get_encapsulated_request(
 +          sender_context,
-+          "GET", "https", "httpbin.org", "/status/201", "",
++          request_info_.method,
++          request_info_.url.scheme(),
++          request_info_.url.host(),
++          request_info_.url.path(),
++          "", // TODO: read the provided upload_data_stream
 +          client_enc, &client_enc_len,
 +          pkR, pkR_len);
-+        std::cout << "Encapsulated request size: " << byte_data.size() << std::endl;
-+        for (int i = 0; i < (int)byte_data.size(); i++) {
-+          std::cout << std::hex << (int)byte_data[i] << " ";
-+        }
-+        std::cout << std::endl;
 +        const char* request_data = reinterpret_cast<const char*>(byte_data.data());
 +        std::vector<std::unique_ptr<UploadElementReader>> readers;
 +        readers.push_back(
@@ -291,7 +384,7 @@ index da6ee48808da0..be5ef5bfecc00 100644
      rv = request_->context()->http_transaction_factory()->CreateTransaction(
          priority_, &transaction_);
  
-@@ -575,6 +611,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -575,6 +630,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
      }
  
      if (rv == OK) {
@@ -299,7 +392,7 @@ index da6ee48808da0..be5ef5bfecc00 100644
        transaction_->SetConnectedCallback(base::BindRepeating(
            &URLRequestHttpJob::NotifyConnectedCallback, base::Unretained(this)));
        transaction_->SetRequestHeadersCallback(request_headers_callback_);
-@@ -587,6 +624,9 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -587,6 +643,9 @@ void URLRequestHttpJob::StartTransactionInternal() {
  
          // Don't use the Envoy proxy when LOAD_BYPASS_PROXY is set
          // Specifically, we don't want to use Envoy for DoH requests
@@ -309,7 +402,7 @@ index da6ee48808da0..be5ef5bfecc00 100644
          if (!(request_info_.load_flags & LOAD_BYPASS_PROXY)) {
  
            if (request_->context()->envoy_url().rfind("http://", 0) == 0 ||
-@@ -607,20 +647,30 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -607,20 +666,27 @@ void URLRequestHttpJob::StartTransactionInternal() {
                  auto value = it.GetUnescapedValue();
                  if (key.compare("url") == 0) {
                    // see GetUnescapedValue, TODO check is_valid() before set
@@ -329,8 +422,6 @@ index da6ee48808da0..be5ef5bfecc00 100644
 +                      value);  // check for header Host, add :authority for
 +                               // http2; :path for http2
 +                } else if (key.compare("ohttp") == 0) {
-+                  // Do OHTTP Things
-+                  // TODO: HPKE-encapsulated version of original request.
 +                  request_info_.method = "POST";
                    request_info_.extra_headers.SetHeader(
 -                      key.substr(headerPrefixLength), value); // check for header Host, add :authority for http2; :path for http2
@@ -339,41 +430,14 @@ index da6ee48808da0..be5ef5bfecc00 100644
                }
              }
  
- 
+-
              // count for cache key
 +            // So why do we use the digest?  It gets passed to the proxy, but not to the
 +            // target server (that's good).
              auto digest = crypto::SHA256HashString(request_->url().spec() + salt);
              request_info_.url =
                  AppendQueryParameter(request_info_.url, "_digest", digest);
-@@ -1187,6 +1237,8 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
- }
- 
- void URLRequestHttpJob::OnHeadersReceivedCallback(int result) {
-+  if (!byte_data.empty())
-+    std::cout << "URLRequestHttpJob::OnHeadersReceivedCallback" << std::endl;
-   // The request should not have been cancelled or have already completed.
-   DCHECK(!is_done());
- 
-@@ -1196,6 +1248,8 @@ void URLRequestHttpJob::OnHeadersReceivedCallback(int result) {
- }
- 
- void URLRequestHttpJob::OnReadCompleted(int result) {
-+  if (!byte_data.empty())
-+    std::cout << "URLRequestHttpJob::OnReadCompleted" << std::endl;
-   TRACE_EVENT0(NetTracingCategory(), "URLRequestHttpJob::OnReadCompleted");
-   read_in_progress_ = false;
- 
-@@ -1284,6 +1338,8 @@ bool URLRequestHttpJob::GetCharset(std::string* charset) {
- }
- 
- void URLRequestHttpJob::GetResponseInfo(HttpResponseInfo* info) {
-+  if (!byte_data.empty())
-+    std::cout << "URLRequestHttpJob::GetResponseInfo" << std::endl;
-   if (override_response_info_) {
-     DCHECK(!transaction_.get());
-     *info = *override_response_info_;
-@@ -1561,22 +1617,72 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
+@@ -1561,22 +1627,61 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
  int URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size) {
    DCHECK_NE(buf_size, 0);
    DCHECK(!read_in_progress_);
@@ -382,20 +446,14 @@ index da6ee48808da0..be5ef5bfecc00 100644
 +  // When the transaction *is* done, it should ohttp decapsulate it
 +  // if necessary, and then give it to the caller
 +  int rv;
-+  std::cout << "URLRequestHttpJob::ReadRawData" << std::endl;
 +  if (!byte_data.empty()) {
-+    std::cout << "  Reading raw data for OHTTP req" << std::endl;
-+    std::cout << "  Request URL: " << request_->url().spec() << std::endl;
-+    std::cout << "  Passed buffer size = " << std::dec << buf_size << std::endl;
 +    scoped_refptr<IOBufferWithSize> tbuf = base::MakeRefCounted<IOBufferWithSize>(buf_size);
 +    rv = transaction_->Read(tbuf.get(), buf_size,
 +                                base::BindOnce(&URLRequestHttpJob::OnReadCompleted,
 +                                               base::Unretained(this)));
 +    // Read the contents of the temporary buffer into response data vector
 +    if (rv > 0) {
-+      std::cout << "  Read " << std::dec << rv << " bytes" << std::endl;
 +      response_data.insert(response_data.end(), tbuf->data(), tbuf->data() + rv);
-+      std::cout << "  Response buffer currently has " << std::dec << response_data.size() << " bytes" << std::endl;
 +      size_t max_drequest_len = response_data.size();
 +      uint8_t dresponse[max_drequest_len];
 +      size_t dresponse_len;
@@ -408,29 +466,11 @@ index da6ee48808da0..be5ef5bfecc00 100644
 +        &dresponse_len, 
 +        max_drequest_len);
 +      if (decap_result != ohttp::DecapsulationErrorCode::SUCCESS) {
-+        std::cout << "Decapsulation failed" << ohttp::DecapsulationErrorCodeToString(decap_result) << std::endl;
 +        return ERR_FAILED;  // Why did we fail? Are we not done reading from the network?  Handle that differently.
 +      }
-+      std::cout << "Decapsulation successful" << std::endl;
-+      std::cout << "  Decapsulated response has " << std::dec << dresponse_len << " bytes and status ";
-+      std::cout << std::dec << (int)dresponse[1] << std::endl;
-+      std::cout << std::endl;
-+      // Copy the decapsulated response into the buffer
-+      memcpy(buf->data(), dresponse, dresponse_len);
-+      return dresponse_len;      
-+    } else {
-+      std::cout << "  URLRequestHttpJob::ReadRawData DoneWithRequest" << std::endl;
-+      DoneWithRequest(FINISHED);
-+      return rv;
-+    }
-+  } else {
-+    // usual control flow
-+    rv =
-+        transaction_->Read(buf, buf_size,
-+                          base::BindOnce(&URLRequestHttpJob::OnReadCompleted,
-+                                          base::Unretained(this)));
-+    if (ShouldFixMismatchedContentLength(rv))
-+      rv = OK;
++      std::vector<uint8_t> dresponse_as_vec;
++      dresponse_as_vec.insert(dresponse_as_vec.end(), dresponse, dresponse + dresponse_len);
++      std::string body = ohttp::get_body_from_binary_response(dresponse_as_vec);
  
 -  int rv =
 -      transaction_->Read(buf, buf_size,
@@ -445,40 +485,34 @@ index da6ee48808da0..be5ef5bfecc00 100644
 -
 -  if (rv == ERR_IO_PENDING)
 -    read_in_progress_ = true;
--
++      // Copy the decapsulated response into the buffer
++      memcpy(buf->data(), body.c_str(), body.size());
++      return dresponse_len;
++    } else {
++      DoneWithRequest(FINISHED);
++      return rv;
++    }
++  } else {
++    // usual control flow
++    rv =
++        transaction_->Read(buf, buf_size,
++                          base::BindOnce(&URLRequestHttpJob::OnReadCompleted,
++                                          base::Unretained(this)));
++    if (ShouldFixMismatchedContentLength(rv))
++      rv = OK;
+ 
 -  return rv;
 +    if (rv == 0 || (rv < 0 && rv != ERR_IO_PENDING)) {
-+      std::cout << "  URLRequestHttpJob::ReadRawData DoneWithRequest" << std::endl;
 +      DoneWithRequest(FINISHED);
 +    }
 +    if (rv == ERR_IO_PENDING) {
-+      std::cout << "  URLRequestHttpJob::ReadRawData ERR_IO_PENDING" << std::endl;
 +      read_in_progress_ = true;
 +    }
-+    std::cout << "  URLRequestHttpJob::ReadRawData returning rv: " << std::dec << rv << std::endl;
 +    return rv;
 +  }
  }
  
  int64_t URLRequestHttpJob::GetTotalReceivedBytes() const {
-@@ -1595,6 +1701,8 @@ int64_t URLRequestHttpJob::GetTotalSentBytes() const {
- }
- 
- void URLRequestHttpJob::DoneReading() {
-+  if (!byte_data.empty())
-+    std::cout << "URLRequestHttpJob::DoneReading" << std::endl;
-   if (transaction_) {
-     transaction_->DoneReading();
-   }
-@@ -1766,6 +1874,8 @@ void URLRequestHttpJob::RecordCompletionHistograms(CompletionCause reason) {
- }
- 
- void URLRequestHttpJob::DoneWithRequest(CompletionCause reason) {
-+  if (!byte_data.empty())
-+    std::cout << "URLRequestHttpJob::DoneWithRequest" << std::endl;
-   if (done_)
-     return;
-   done_ = true;
 diff --git a/net/url_request/url_request_http_job.h b/net/url_request/url_request_http_job.h
 index 866c8287a9b95..aba86e500b2db 100644
 --- a/net/url_request/url_request_http_job.h
@@ -505,7 +539,7 @@ index 866c8287a9b95..aba86e500b2db 100644
    URLRequestHttpJob(URLRequest* request,
                      const HttpUserAgentSettings* http_user_agent_settings);
 diff --git a/net/url_request/url_request_job.cc b/net/url_request/url_request_job.cc
-index 0127bbcf86499..8b6012f6a4801 100644
+index 0127bbcf86499..a856f21a9a2b1 100644
 --- a/net/url_request/url_request_job.cc
 +++ b/net/url_request/url_request_job.cc
 @@ -4,6 +4,7 @@
@@ -516,12 +550,11 @@ index 0127bbcf86499..8b6012f6a4801 100644
  #include <utility>
  
  #include "base/bind.h"
-@@ -688,7 +689,7 @@ int URLRequestJob::ReadRawDataHelper(IOBuffer* buf,
+@@ -688,7 +689,6 @@ int URLRequestJob::ReadRawDataHelper(IOBuffer* buf,
    // TODO(xunjieli): Make ReadRawData take in a callback rather than requiring
    // subclass to call ReadRawDataComplete upon asynchronous completion.
    int result = ReadRawData(buf, buf_size);
 -
-+  std::cout << "URLRequestJob::ReadRawDataHelper rv " << std::dec << result << std::endl;
    if (result != ERR_IO_PENDING) {
      // If the read completes synchronously, either success or failure, invoke
      // GatherRawReadStats so we can account for the completed read.
@@ -555,10 +588,10 @@ index 0000000000000..e0cf6234938bc
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp.cc b/third_party/ohttp/ohttp.cc
 new file mode 100644
-index 0000000000000..5bde77f7be17b
+index 0000000000000..89690c76ea9d0
 --- /dev/null
 +++ b/third_party/ohttp/ohttp.cc
-@@ -0,0 +1,760 @@
+@@ -0,0 +1,783 @@
 +#include <vector>
 +#include <iostream>
 +#include <stdexcept>
@@ -864,6 +897,29 @@ index 0000000000000..5bde77f7be17b
 +        size_t body_length = binary_request[offset];
 +        for (size_t i = 1; i <= body_length; i++) {
 +            body.push_back(static_cast<char>(binary_request[offset + i]));
++        }
++        return body;
++    }
++
++    std::string get_body_from_binary_response(const std::vector<uint8_t>& binary_response) {
++        // Known-Length Response {
++        //   Framing Indicator (i) = 1,
++        //   Known-Length Informational Response (..) ...,
++        //   Final Response Control Data (..),
++        //   Known-Length Field Section (..),
++        //   Known-Length Content (..),
++        //   Known-Length Field Section (..),
++        //   Padding (..),
++        // }
++        int offset = 0;
++        offset += 1; // Skip framing indicator
++        // Assume no informational responses.
++        offset += 1; // Skip final response control data, assuming it's 1 byte.
++        offset += 1 + binary_response[offset]; // Skip field section
++        std::string body;
++        size_t body_length = binary_response[offset];
++        for (size_t i = 1; i <= body_length; i++) {
++            body.push_back(static_cast<char>(binary_response[offset + i]));
 +        }
 +        return body;
 +    }
@@ -1322,10 +1378,10 @@ index 0000000000000..5bde77f7be17b
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp.h b/third_party/ohttp/ohttp.h
 new file mode 100644
-index 0000000000000..fc1bce6851e95
+index 0000000000000..9cf994a5f9649
 --- /dev/null
 +++ b/third_party/ohttp/ohttp.h
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,113 @@
 +// Sketch of OHTTP implementation
 +
 +#ifndef OHTTP_H
@@ -1426,6 +1482,8 @@ index 0000000000000..fc1bce6851e95
 +
 +    OHTTP_EXPORT std::string get_body_from_binary_request(const std::vector<uint8_t>& binary_request);
 +
++    OHTTP_EXPORT std::string get_body_from_binary_response(const std::vector<uint8_t>& binary_response);
++
 +    OHTTP_EXPORT std::vector<uint8_t> get_encapsulated_request(OHTTP_HPKE_CTX* sender_context, const std::string& method, const std::string& scheme, const std::string& host, const std::string& path, const std::string& body, uint8_t* client_enc, size_t* client_enc_len, uint8_t* pkR, size_t pkR_len);
 +
 +    OHTTP_EXPORT std::vector<uint8_t> encapsulate_response(OHTTP_HPKE_CTX* reciever_context, uint8_t* enc, size_t enc_len, const int response_code, const std::string& response_body);
@@ -1440,10 +1498,10 @@ index 0000000000000..fc1bce6851e95
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp_test.cc b/third_party/ohttp/ohttp_test.cc
 new file mode 100644
-index 0000000000000..3f9cd26e4cf93
+index 0000000000000..c5633f1521c41
 --- /dev/null
 +++ b/third_party/ohttp/ohttp_test.cc
-@@ -0,0 +1,394 @@
+@@ -0,0 +1,404 @@
 +#include <vector>
 +
 +#include "gtest/gtest.h"
@@ -1830,6 +1888,16 @@ index 0000000000000..3f9cd26e4cf93
 +  EXPECT_EQ(out_len, expected_bhttp.size());
 +  std::vector<uint8_t> request_bhttp_vec(request_bhttp.data(), request_bhttp.data() + out_len);
 +  EXPECT_EQ(request_bhttp_vec, expected_bhttp);
++}
++
++// Enc/Decapsulate routrip test
++TEST(OhttpTest, ParseBHTTPResponse) {
++  std::string response_message = "bar";
++  std::vector<uint8_t> resp_text = std::vector<uint8_t>(response_message.begin(), response_message.end());
++  std::vector<uint8_t> response = ohttp::get_binary_response(200, resp_text);
++
++  std::string parsed_message = ohttp::get_body_from_binary_response(response);
++  EXPECT_EQ(parsed_message, response_message);
 +}
 +
 +}  // namespace
