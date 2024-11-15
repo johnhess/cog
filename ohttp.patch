@@ -11,10 +11,10 @@ index 92350cf3b4b77..685dd0a147bca 100644
      if ((is_linux || is_chromeos) && !is_component_build) {
        public_configs = [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
 diff --git a/components/cronet/native/sample/main.cc b/components/cronet/native/sample/main.cc
-index 007d5bbab90d7..0276c927c29df 100644
+index 007d5bbab90d7..7c1548ffe64bb 100644
 --- a/components/cronet/native/sample/main.cc
 +++ b/components/cronet/native/sample/main.cc
-@@ -3,46 +3,33 @@
+@@ -3,46 +3,34 @@
  // found in the LICENSE file.
  
  #include <iostream>
@@ -35,17 +35,20 @@ index 007d5bbab90d7..0276c927c29df 100644
 -  Cronet_EngineParams_envoy_url_set(engine_params,
 -                                    "https://example.com/enovy_path/");
 +  // Standard HTTPS Proxy using Envoy's ansible roles.
++  // Cronet_EngineParams_envoy_url_set(
++  //     engine_params,
++  //     "envoy://"
++  //     "?url=https%3A%2F%2Fenvoy-proxies.jthess.com%2Fenvoy_proxy_path%2F&header_Host="
++  //     "ohttp-gateway.jthess.com");
    Cronet_EngineParams_envoy_url_set(
        engine_params,
        "envoy://"
 -      "?url=https%3A%2F%2Fexample.com%2Fenvoy_path%2F%3Fk1%3Dv1&header_Host="
 -      "subdomain.example.com&resolve=MAP%20example.com%201.2.3.4");
 -  // only MAP url-host to address
-+      "?url=https%3A%2F%2Fenvoy-proxies.jthess.com%2Fenvoy_proxy_path%2F&header_Host="
-+      "ohttp-gateway.jthess.com");
-   Cronet_EngineParams_envoy_url_set(
-       engine_params,
-       "envoy://"
+-  Cronet_EngineParams_envoy_url_set(
+-      engine_params,
+-      "envoy://"
 -      "?url=https%3A%2F%2Fexample.com%2Fenvoy_path%2F%3Fk1%3Dv1&header_Host="
 -      "subdomain.example.com&address=1.2.3.4");
 -  Cronet_EngineParams_envoy_url_set(
@@ -67,12 +70,18 @@ index 007d5bbab90d7..0276c927c29df 100644
 -      "&header_Host=abc.example.com&socks5=socks5%3A%2F%2Flocalhost%3A8192");
 +      "?url=https%3A%2F%2Fohttp-relay.jthess.com" // Relay
 +      "&ohttp=1" // Flag to indicate this is an ohttp relay
-+      "&ohttp_gateway=ohttp-gateway.jthess.com"   // Explicit Gateway
++      "&ohttp_gateway=ohttp-gateway.jthess.com/gog/gateway"
++      "&ohttp_config=ohttp-gateway.jthess.com/gog/ohttp-keys"
 +  );
   
    Cronet_EngineParams_enable_quic_set(engine_params, true);
  
-@@ -72,6 +59,7 @@ void PerformRequest(Cronet_EnginePtr cronet_engine,
+@@ -68,10 +56,11 @@ void PerformRequest(Cronet_EnginePtr cronet_engine,
+   url_request_callback.WaitForDone();
+   Cronet_UrlRequest_Destroy(request);
+ 
+-  std::cout << "Response Data:" << std::endl
++  std::cout << "Response To Caller:" << std::endl
              << url_request_callback.response_as_string() << std::endl;
  }
  
@@ -80,7 +89,7 @@ index 007d5bbab90d7..0276c927c29df 100644
  // Download a resource from the Internet. Optional argument must specify
  // a valid URL.
  int main(int argc, const char* argv[]) {
-@@ -80,7 +68,7 @@ int main(int argc, const char* argv[]) {
+@@ -80,7 +69,7 @@ int main(int argc, const char* argv[]) {
    std::cout << "Cronet version: "
              << Cronet_Engine_GetVersionString(cronet_engine) << std::endl;
  
@@ -90,17 +99,57 @@ index 007d5bbab90d7..0276c927c29df 100644
    SampleExecutor executor;
    PerformRequest(cronet_engine, url, executor.GetExecutor());
 diff --git a/components/cronet/native/sample/sample_url_request_callback.cc b/components/cronet/native/sample/sample_url_request_callback.cc
-index 396e27dbd27d2..79ddccc0d1ae1 100644
+index 396e27dbd27d2..f1693a4d37a04 100644
 --- a/components/cronet/native/sample/sample_url_request_callback.cc
 +++ b/components/cronet/native/sample/sample_url_request_callback.cc
-@@ -56,6 +56,7 @@ void SampleUrlRequestCallback::OnReadCompleted(Cronet_UrlRequestPtr request,
-   std::string last_read_data(
-       reinterpret_cast<char*>(Cronet_Buffer_GetData(buffer)), bytes_read);
-   response_as_string_ += last_read_data;
-+  std::cout << response_as_string_ << std::endl;
-   // Continue reading the response.
+@@ -29,15 +29,15 @@ void SampleUrlRequestCallback::OnRedirectReceived(
+     Cronet_UrlRequestPtr request,
+     Cronet_UrlResponseInfoPtr info,
+     Cronet_String newLocationUrl) {
+-  std::cout << "OnRedirectReceived called: " << newLocationUrl << std::endl;
++  std::cout << "SampleUrlRequestCallback::OnRedirectReceived called: " << newLocationUrl << std::endl;
+   Cronet_UrlRequest_FollowRedirect(request);
+ }
+ 
+ void SampleUrlRequestCallback::OnResponseStarted(
+     Cronet_UrlRequestPtr request,
+     Cronet_UrlResponseInfoPtr info) {
+-  std::cout << "OnResponseStarted called." << std::endl;
+-  std::cout << "HTTP Status: "
++  std::cout << "SampleUrlRequestCallback::OnResponseStarted called." << std::endl;
++  std::cout << "HTTP Status: " << std::dec
+             << Cronet_UrlResponseInfo_http_status_code_get(info) << " "
+             << Cronet_UrlResponseInfo_http_status_text_get(info) << std::endl;
+   // Create and allocate 32kb buffer.
+@@ -51,25 +51,21 @@ void SampleUrlRequestCallback::OnReadCompleted(Cronet_UrlRequestPtr request,
+                                                Cronet_UrlResponseInfoPtr info,
+                                                Cronet_BufferPtr buffer,
+                                                uint64_t bytes_read) {
+-  std::cout << "OnReadCompleted called: " << bytes_read << " bytes read."
++  std::cout << "SampleUrlRequestCallback::OnReadCompleted called: " << bytes_read << " bytes read."
+             << std::endl;
+-  std::string last_read_data(
+-      reinterpret_cast<char*>(Cronet_Buffer_GetData(buffer)), bytes_read);
+-  response_as_string_ += last_read_data;
+-  // Continue reading the response.
    Cronet_UrlRequest_Read(request, buffer);
  }
+ 
+ void SampleUrlRequestCallback::OnSucceeded(Cronet_UrlRequestPtr request,
+                                            Cronet_UrlResponseInfoPtr info) {
+-  std::cout << "OnSucceeded called." << std::endl;
++  std::cout << "SampleUrlRequestCallback::OnSucceeded called." << std::endl;
+   SignalDone(true);
+ }
+ 
+ void SampleUrlRequestCallback::OnFailed(Cronet_UrlRequestPtr request,
+                                         Cronet_UrlResponseInfoPtr info,
+                                         Cronet_ErrorPtr error) {
+-  std::cout << "OnFailed called: " << Cronet_Error_message_get(error)
++  std::cout << "SampleUrlRequestCallback::OnFailed called: " << Cronet_Error_message_get(error)
+             << std::endl;
+   last_error_message_ = Cronet_Error_message_get(error);
+   SignalDone(false);
 diff --git a/components/cronet/native/sample/test/sample_test.cc b/components/cronet/native/sample/test/sample_test.cc
 index 7831b69f72a4a..ee0e6167ada44 100644
 --- a/components/cronet/native/sample/test/sample_test.cc
@@ -127,7 +176,7 @@ index e12e5b6936b8d..bbd05f79d0072 100644
  
    allow_circular_includes_from = [
 diff --git a/net/url_request/url_request_context_builder.cc b/net/url_request/url_request_context_builder.cc
-index b3b5b9da8f5ae..8d847d267e228 100644
+index b3b5b9da8f5ae..23a3a86673ec9 100644
 --- a/net/url_request/url_request_context_builder.cc
 +++ b/net/url_request/url_request_context_builder.cc
 @@ -55,6 +55,7 @@
@@ -138,7 +187,7 @@ index b3b5b9da8f5ae..8d847d267e228 100644
  #include "url/url_constants.h"
  
  #if BUILDFLAG(ENABLE_REPORTING)
-@@ -286,8 +287,12 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
+@@ -286,8 +287,11 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
    context->set_require_network_isolation_key(require_network_isolation_key_);
    context->set_network_quality_estimator(network_quality_estimator_);
  
@@ -147,12 +196,11 @@ index b3b5b9da8f5ae..8d847d267e228 100644
 +  if (!envoy_url_.empty()) {
      context->set_envoy_url(envoy_url_);
 +    std::cout << "Envoy URL is: " << envoy_url_ << std::endl;
-+    std::cout << "Our Request is: " << ohttp::GetFoo() << std::endl;
 +  }
    if (http_user_agent_settings_) {
      context->set_http_user_agent_settings(std::move(http_user_agent_settings_));
    } else {
-@@ -380,6 +385,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
+@@ -380,6 +384,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
    // TODO assert value
    auto url = GURL(value);
  
@@ -160,7 +208,7 @@ index b3b5b9da8f5ae..8d847d267e228 100644
    if (GetValueForKeyInQuery(envoy_url, "resolve", &value)) {
      std::unique_ptr<net::MappedHostResolver> remapped_resolver(
          new net::MappedHostResolver(std::move(host_resolver_)));
-@@ -399,6 +405,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
+@@ -399,6 +404,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
    } else {
      SSLContextConfig ssl_context_config;
      std::vector<uint16_t> disabled_ciphers;
@@ -169,7 +217,7 @@ index b3b5b9da8f5ae..8d847d267e228 100644
        auto cipher_strings = base::SplitString(value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
        // see net::ParseCipherSuites(cipher_strings);
 diff --git a/net/url_request/url_request_http_job.cc b/net/url_request/url_request_http_job.cc
-index da6ee48808da0..aa451221ad3a0 100644
+index da6ee48808da0..be5ef5bfecc00 100644
 --- a/net/url_request/url_request_http_job.cc
 +++ b/net/url_request/url_request_http_job.cc
 @@ -36,6 +36,7 @@
@@ -204,7 +252,7 @@ index da6ee48808da0..aa451221ad3a0 100644
  
    // NOTE: This method assumes that request_info_ is already setup properly.
  
-@@ -560,6 +564,25 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -560,6 +564,38 @@ void URLRequestHttpJob::StartTransactionInternal() {
    } else {
      DCHECK(request_->context()->http_transaction_factory());
  
@@ -213,9 +261,22 @@ index da6ee48808da0..aa451221ad3a0 100644
 +      if (request_->context()->envoy_url().rfind("http://", 0) == 0 ||
 +                    request_->context()->envoy_url().rfind("https://", 0) == 0 ||
 +                    request_->context()->envoy_url().rfind("envoy://", 0) == 0) {
-+        // Override the response since we need to decrypt it
++        // TODO: Override the response since we need to decrypt it
 +        std::cout << "Constructing an HPKE encapsulated binary request" << std::endl;
-+        byte_data = ohttp::get_encapsulated_request("/", "ohttp-gateway.jthess.com", "foo");
++        size_t pkR_len = 32;
++        // TODO: get the PK from the config
++        uint8_t pkR[] = {0x69, 0xd7, 0x41, 0x15, 0xc6, 0x55, 0xd3, 0x7c, 0xb5, 0x3b, 0x9a, 0x1a, 0x5a, 0x3b, 0x71, 0x1d, 0xc5, 0x49, 0x56, 0xc3, 0x4e, 0x47, 0x8b, 0xf0, 0x2f, 0x5a, 0xad, 0x4f, 0x02, 0x93, 0x14, 0x18};
++        sender_context = ohttp::createHpkeContext();
++        byte_data = ohttp::get_encapsulated_request(
++          sender_context,
++          "GET", "https", "httpbin.org", "/status/201", "",
++          client_enc, &client_enc_len,
++          pkR, pkR_len);
++        std::cout << "Encapsulated request size: " << byte_data.size() << std::endl;
++        for (int i = 0; i < (int)byte_data.size(); i++) {
++          std::cout << std::hex << (int)byte_data[i] << " ";
++        }
++        std::cout << std::endl;
 +        const char* request_data = reinterpret_cast<const char*>(byte_data.data());
 +        std::vector<std::unique_ptr<UploadElementReader>> readers;
 +        readers.push_back(
@@ -230,7 +291,7 @@ index da6ee48808da0..aa451221ad3a0 100644
      rv = request_->context()->http_transaction_factory()->CreateTransaction(
          priority_, &transaction_);
  
-@@ -575,6 +598,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -575,6 +611,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
      }
  
      if (rv == OK) {
@@ -238,7 +299,7 @@ index da6ee48808da0..aa451221ad3a0 100644
        transaction_->SetConnectedCallback(base::BindRepeating(
            &URLRequestHttpJob::NotifyConnectedCallback, base::Unretained(this)));
        transaction_->SetRequestHeadersCallback(request_headers_callback_);
-@@ -587,6 +611,9 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -587,6 +624,9 @@ void URLRequestHttpJob::StartTransactionInternal() {
  
          // Don't use the Envoy proxy when LOAD_BYPASS_PROXY is set
          // Specifically, we don't want to use Envoy for DoH requests
@@ -248,7 +309,7 @@ index da6ee48808da0..aa451221ad3a0 100644
          if (!(request_info_.load_flags & LOAD_BYPASS_PROXY)) {
  
            if (request_->context()->envoy_url().rfind("http://", 0) == 0 ||
-@@ -607,20 +634,30 @@ void URLRequestHttpJob::StartTransactionInternal() {
+@@ -607,20 +647,30 @@ void URLRequestHttpJob::StartTransactionInternal() {
                  auto value = it.GetUnescapedValue();
                  if (key.compare("url") == 0) {
                    // see GetUnescapedValue, TODO check is_valid() before set
@@ -285,19 +346,185 @@ index da6ee48808da0..aa451221ad3a0 100644
              auto digest = crypto::SHA256HashString(request_->url().spec() + salt);
              request_info_.url =
                  AppendQueryParameter(request_info_.url, "_digest", digest);
+@@ -1187,6 +1237,8 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
+ }
+ 
+ void URLRequestHttpJob::OnHeadersReceivedCallback(int result) {
++  if (!byte_data.empty())
++    std::cout << "URLRequestHttpJob::OnHeadersReceivedCallback" << std::endl;
+   // The request should not have been cancelled or have already completed.
+   DCHECK(!is_done());
+ 
+@@ -1196,6 +1248,8 @@ void URLRequestHttpJob::OnHeadersReceivedCallback(int result) {
+ }
+ 
+ void URLRequestHttpJob::OnReadCompleted(int result) {
++  if (!byte_data.empty())
++    std::cout << "URLRequestHttpJob::OnReadCompleted" << std::endl;
+   TRACE_EVENT0(NetTracingCategory(), "URLRequestHttpJob::OnReadCompleted");
+   read_in_progress_ = false;
+ 
+@@ -1284,6 +1338,8 @@ bool URLRequestHttpJob::GetCharset(std::string* charset) {
+ }
+ 
+ void URLRequestHttpJob::GetResponseInfo(HttpResponseInfo* info) {
++  if (!byte_data.empty())
++    std::cout << "URLRequestHttpJob::GetResponseInfo" << std::endl;
+   if (override_response_info_) {
+     DCHECK(!transaction_.get());
+     *info = *override_response_info_;
+@@ -1561,22 +1617,72 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
+ int URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size) {
+   DCHECK_NE(buf_size, 0);
+   DCHECK(!read_in_progress_);
++  // This should be modified
++  // It should not give the caller data if the transaction is not done
++  // When the transaction *is* done, it should ohttp decapsulate it
++  // if necessary, and then give it to the caller
++  int rv;
++  std::cout << "URLRequestHttpJob::ReadRawData" << std::endl;
++  if (!byte_data.empty()) {
++    std::cout << "  Reading raw data for OHTTP req" << std::endl;
++    std::cout << "  Request URL: " << request_->url().spec() << std::endl;
++    std::cout << "  Passed buffer size = " << std::dec << buf_size << std::endl;
++    scoped_refptr<IOBufferWithSize> tbuf = base::MakeRefCounted<IOBufferWithSize>(buf_size);
++    rv = transaction_->Read(tbuf.get(), buf_size,
++                                base::BindOnce(&URLRequestHttpJob::OnReadCompleted,
++                                               base::Unretained(this)));
++    // Read the contents of the temporary buffer into response data vector
++    if (rv > 0) {
++      std::cout << "  Read " << std::dec << rv << " bytes" << std::endl;
++      response_data.insert(response_data.end(), tbuf->data(), tbuf->data() + rv);
++      std::cout << "  Response buffer currently has " << std::dec << response_data.size() << " bytes" << std::endl;
++      size_t max_drequest_len = response_data.size();
++      uint8_t dresponse[max_drequest_len];
++      size_t dresponse_len;
++      ohttp::DecapsulationErrorCode decap_result = decapsulate_response(
++        sender_context, 
++        client_enc, 
++        client_enc_len, 
++        response_data,
++        dresponse,
++        &dresponse_len, 
++        max_drequest_len);
++      if (decap_result != ohttp::DecapsulationErrorCode::SUCCESS) {
++        std::cout << "Decapsulation failed" << ohttp::DecapsulationErrorCodeToString(decap_result) << std::endl;
++        return ERR_FAILED;  // Why did we fail? Are we not done reading from the network?  Handle that differently.
++      }
++      std::cout << "Decapsulation successful" << std::endl;
++      std::cout << "  Decapsulated response has " << std::dec << dresponse_len << " bytes and status ";
++      std::cout << std::dec << (int)dresponse[1] << std::endl;
++      std::cout << std::endl;
++      // Copy the decapsulated response into the buffer
++      memcpy(buf->data(), dresponse, dresponse_len);
++      return dresponse_len;      
++    } else {
++      std::cout << "  URLRequestHttpJob::ReadRawData DoneWithRequest" << std::endl;
++      DoneWithRequest(FINISHED);
++      return rv;
++    }
++  } else {
++    // usual control flow
++    rv =
++        transaction_->Read(buf, buf_size,
++                          base::BindOnce(&URLRequestHttpJob::OnReadCompleted,
++                                          base::Unretained(this)));
++    if (ShouldFixMismatchedContentLength(rv))
++      rv = OK;
+ 
+-  int rv =
+-      transaction_->Read(buf, buf_size,
+-                         base::BindOnce(&URLRequestHttpJob::OnReadCompleted,
+-                                        base::Unretained(this)));
+-
+-  if (ShouldFixMismatchedContentLength(rv))
+-    rv = OK;
+-
+-  if (rv == 0 || (rv < 0 && rv != ERR_IO_PENDING))
+-    DoneWithRequest(FINISHED);
+-
+-  if (rv == ERR_IO_PENDING)
+-    read_in_progress_ = true;
+-
+-  return rv;
++    if (rv == 0 || (rv < 0 && rv != ERR_IO_PENDING)) {
++      std::cout << "  URLRequestHttpJob::ReadRawData DoneWithRequest" << std::endl;
++      DoneWithRequest(FINISHED);
++    }
++    if (rv == ERR_IO_PENDING) {
++      std::cout << "  URLRequestHttpJob::ReadRawData ERR_IO_PENDING" << std::endl;
++      read_in_progress_ = true;
++    }
++    std::cout << "  URLRequestHttpJob::ReadRawData returning rv: " << std::dec << rv << std::endl;
++    return rv;
++  }
+ }
+ 
+ int64_t URLRequestHttpJob::GetTotalReceivedBytes() const {
+@@ -1595,6 +1701,8 @@ int64_t URLRequestHttpJob::GetTotalSentBytes() const {
+ }
+ 
+ void URLRequestHttpJob::DoneReading() {
++  if (!byte_data.empty())
++    std::cout << "URLRequestHttpJob::DoneReading" << std::endl;
+   if (transaction_) {
+     transaction_->DoneReading();
+   }
+@@ -1766,6 +1874,8 @@ void URLRequestHttpJob::RecordCompletionHistograms(CompletionCause reason) {
+ }
+ 
+ void URLRequestHttpJob::DoneWithRequest(CompletionCause reason) {
++  if (!byte_data.empty())
++    std::cout << "URLRequestHttpJob::DoneWithRequest" << std::endl;
+   if (done_)
+     return;
+   done_ = true;
 diff --git a/net/url_request/url_request_http_job.h b/net/url_request/url_request_http_job.h
-index 866c8287a9b95..fd26d87b87e2a 100644
+index 866c8287a9b95..aba86e500b2db 100644
 --- a/net/url_request/url_request_http_job.h
 +++ b/net/url_request/url_request_http_job.h
-@@ -60,7 +60,7 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
+@@ -31,6 +31,7 @@
+ #include "net/url_request/url_request_job.h"
+ #include "net/url_request/url_request_throttler_entry_interface.h"
+ #include "third_party/abseil-cpp/absl/types/optional.h"
++#include "third_party/ohttp/ohttp.h"
+ 
+ namespace net {
+ 
+@@ -60,7 +61,11 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
    void SetEarlyResponseHeadersCallback(
        ResponseHeadersCallback callback) override;
    void SetResponseHeadersCallback(ResponseHeadersCallback callback) override;
 -
 +  std::vector<uint8_t> byte_data;
++  std::vector<uint8_t> response_data;
++  ohttp::OHTTP_HPKE_CTX* sender_context;
++  uint8_t client_enc[65];  // TODO: Don't hardcode this.  However, variables not permitted.
++  size_t client_enc_len;
   protected:
    URLRequestHttpJob(URLRequest* request,
                      const HttpUserAgentSettings* http_user_agent_settings);
+diff --git a/net/url_request/url_request_job.cc b/net/url_request/url_request_job.cc
+index 0127bbcf86499..8b6012f6a4801 100644
+--- a/net/url_request/url_request_job.cc
++++ b/net/url_request/url_request_job.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "net/url_request/url_request_job.h"
+ 
++#include <iostream>
+ #include <utility>
+ 
+ #include "base/bind.h"
+@@ -688,7 +689,7 @@ int URLRequestJob::ReadRawDataHelper(IOBuffer* buf,
+   // TODO(xunjieli): Make ReadRawData take in a callback rather than requiring
+   // subclass to call ReadRawDataComplete upon asynchronous completion.
+   int result = ReadRawData(buf, buf_size);
+-
++  std::cout << "URLRequestJob::ReadRawDataHelper rv " << std::dec << result << std::endl;
+   if (result != ERR_IO_PENDING) {
+     // If the read completes synchronously, either success or failure, invoke
+     // GatherRawReadStats so we can account for the completed read.
 diff --git a/third_party/ohttp/BUILD.gn b/third_party/ohttp/BUILD.gn
 new file mode 100644
 index 0000000000000..e0cf6234938bc
@@ -328,21 +555,144 @@ index 0000000000000..e0cf6234938bc
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp.cc b/third_party/ohttp/ohttp.cc
 new file mode 100644
-index 0000000000000..0bef527f86e7c
+index 0000000000000..5bde77f7be17b
 --- /dev/null
 +++ b/third_party/ohttp/ohttp.cc
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,760 @@
 +#include <vector>
 +#include <iostream>
 +#include <stdexcept>
 +
-+#include "third_party/ohttp/ohttp.h"
-+#include "third_party/boringssl/src/include/openssl/hpke.h"
++#include "ohttp.h"
++#include "openssl/hkdf.h"
++#include "openssl/hpke.h"
++#include "openssl/err.h"
++#include "openssl/rand.h"
 +
 +namespace ohttp {
 +
-+    const char* GetFoo() {
-+        return "foo";
++    struct OHTTP_HPKE_CTX {
++        EVP_HPKE_CTX* internal_ctx;
++    };
++
++    OHTTP_HPKE_CTX* createHpkeContext() {
++        OHTTP_HPKE_CTX* ctx = new OHTTP_HPKE_CTX();
++        ctx->internal_ctx = EVP_HPKE_CTX_new();
++        return ctx;
++    }
++
++    void destroyHpkeContext(OHTTP_HPKE_CTX* ctx) {
++        EVP_HPKE_CTX_free(ctx->internal_ctx);
++        delete ctx;
++    }
++
++    struct OHTTP_HPKE_KEY {
++        EVP_HPKE_KEY* internal_key;
++    };
++
++    OHTTP_HPKE_KEY* createHpkeKey() {
++        OHTTP_HPKE_KEY* key = new OHTTP_HPKE_KEY();
++        key->internal_key = EVP_HPKE_KEY_new();
++        return key;
++    }
++
++    void destroyHpkeKey(OHTTP_HPKE_KEY* key) {
++        EVP_HPKE_KEY_free(key->internal_key);
++        delete key;
++    }
++
++    struct OHTTP_HPKE_KEM {
++        const EVP_HPKE_KEM* internal_kem;
++    };
++
++    OHTTP_HPKE_KEM* createHpkeKem() {
++        OHTTP_HPKE_KEM* kem = new OHTTP_HPKE_KEM();
++        kem->internal_kem = EVP_hpke_x25519_hkdf_sha256();
++        return kem;
++    }
++
++    void destroyHpkeKem(OHTTP_HPKE_KEM* kem) {
++        delete kem;
++    }
++
++    int OHTTP_HPKE_KEY_generate(OHTTP_HPKE_KEY* key, const OHTTP_HPKE_KEM* kem) {
++        return EVP_HPKE_KEY_generate(key->internal_key, kem->internal_kem);
++    }
++
++    bool OHTTP_HPKE_KEY_public_key(OHTTP_HPKE_KEY* key, uint8_t* out, size_t* out_len, size_t max_out) {
++        return EVP_HPKE_KEY_public_key(key->internal_key, out, out_len, max_out);
++    }
++
++    const int OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH = EVP_HPKE_MAX_PUBLIC_KEY_LENGTH;
++    const int OHTTP_HPKE_MAX_ENC_LENGTH = EVP_HPKE_MAX_ENC_LENGTH;
++
++    // Generates a config for a single keypair.
++    std::vector<uint8_t> generate_key_config(OHTTP_HPKE_KEY *keypair) {
++        // HPKE Symmetric Algorithms {
++        //   HPKE KDF ID (16),
++        //   HPKE AEAD ID (16),
++        // }
++
++        // Key Config {
++        //   Key Identifier (8),
++        //   HPKE KEM ID (16),
++        //   HPKE Public Key (Npk * 8),
++        //   HPKE Symmetric Algorithms Length (16) = 4..65532,
++        //   HPKE Symmetric Algorithms (32) ...,
++        // }
++        
++        std::vector<uint8_t> config;
++
++        // Key Identifier is always 0
++        config.push_back(0);
++
++        // KEM_ID
++        const EVP_HPKE_KEM *kem = EVP_HPKE_KEY_kem(keypair->internal_key);
++        const uint16_t kem_id = EVP_HPKE_KEM_id(kem);
++        const uint8_t kem_high_byte = (kem_id >> 8) & 0xFF;
++        const uint8_t kem_low_byte = kem_id & 0xFF;
++        config.push_back(kem_high_byte);
++        config.push_back(kem_low_byte);
++
++        // HPKE Public Key
++        uint8_t public_key[EVP_HPKE_MAX_PUBLIC_KEY_LENGTH];
++        size_t public_key_len;
++        EVP_HPKE_KEY* internal_key = keypair->internal_key;
++        if (!EVP_HPKE_KEY_public_key(internal_key, public_key, &public_key_len, sizeof(public_key))) {
++            config.clear();
++            return config;
++        }
++        std::cout << "Public key length: " << public_key_len << std::endl;
++        config.insert(config.end(), public_key, public_key + public_key_len);
++
++        // Symmetric Algorithms Length
++        config.push_back(0);
++        config.push_back(4);
++
++        // Hardcoded KDF and AEAD IDs
++        config.push_back(0x00);
++        config.push_back(0x01);
++        config.push_back(0x00);
++        config.push_back(0x01);
++
++        // Each encoded configuration is prefixed with a 2-byte integer in 
++        // network byte order that indicates the length of the key configuration
++        // in bytes. The length-prefixed encodings are concatenated to form a
++        // list.
++        const uint16_t length = config.size();
++        const uint8_t high_byte_length = (length >> 8) & 0xFF;
++        const uint8_t low_byte_length = length & 0xFF;
++        config.insert(config.begin(), low_byte_length);
++        config.insert(config.begin(), high_byte_length);
++
++        return config;
++    }
++
++    std::vector<uint8_t> get_public_key(std::vector<uint8_t> key_config) {
++        // Extract the public key from the key configuration.
++        // The public key starts at the 5th byte of the key configuration and is 32 bytes long.
++        std::vector<uint8_t> public_key(key_config.begin() + 5, key_config.begin() + 37);
++        return public_key;
 +    }
 +
 +    // Helper to encode a string as a binary vector (length-prefixed)
@@ -379,7 +729,7 @@ index 0000000000000..0bef527f86e7c
 +    }
 +
 +    // Function to encode the POST request in binary format per RFC 9292
-+    std::vector<uint8_t> get_binary_request(const std::string& path, const std::string& host, const std::string& body) {
++    std::vector<uint8_t> get_binary_request(const std::string& method, const std::string& scheme, const std::string& host, const std::string& path, const std::string& body) {
 +        std::vector<uint8_t> binary_request;
 +
 +        // Known-Length Request {
@@ -408,18 +758,11 @@ index 0000000000000..0bef527f86e7c
 +        // }
 +
 +        // Method Length & Method
-+        std::string method_value = "POST";
-+        std::vector<uint8_t> method_value_field = encode_string(method_value);
-+        // std::cout << "Method value field size: " << method_value_field.size() << std::endl;
-+        // std::cout << "Method value field: ";
-+        // for (uint8_t byte : method_value_field) {
-+        //     std::cout << (int)byte << " ";
-+        // }
++        std::vector<uint8_t> method_value_field = encode_string(method);
 +        binary_request.insert(binary_request.end(), method_value_field.begin(), method_value_field.end());
 +
 +        // Scheme Length & Scheme
-+        std::string scheme_value = "https";
-+        std::vector<uint8_t> scheme_value_field = encode_string(scheme_value);
++        std::vector<uint8_t> scheme_value_field = encode_string(scheme);
 +        binary_request.insert(binary_request.end(), scheme_value_field.begin(), scheme_value_field.end());
 +        
 +        // Authority Length & Authority
@@ -465,21 +808,91 @@ index 0000000000000..0bef527f86e7c
 +        return binary_request;
 +    }
 +
++    std::vector<uint8_t> get_binary_response(const int response_code, const std::vector<uint8_t>& content) {
++      std::vector<uint8_t> binary_response;
++      binary_response.push_back(1); // Known-Length Informational Response
++      binary_response.push_back(response_code); // Status Code      
++      binary_response.push_back(0); // Known-Length Field Section Length
++      binary_response.push_back(content.size()); // Content Length
++      binary_response.insert(binary_response.end(), content.begin(), content.end());
++      binary_response.push_back(0); // Trailer section length
++      return binary_response;
++    }
++
++    std::string get_url_from_binary_request(const std::vector<uint8_t>& binary_request) {
++        std::string url;
++        int offset = 0;
++        offset += 1; // Skip framing indicator
++        offset += 1 + binary_request[offset]; // Skip method
++        size_t scheme_length = binary_request[offset];
++        // Add Scheme to URL
++        for (size_t i = 0; i < scheme_length; i++) {
++            url.push_back(static_cast<char>(binary_request[offset + 1 + i]));
++        }
++        url += "://";
++        offset += 1 + scheme_length; // Skip scheme length and scheme
++        size_t authority_length = binary_request[offset];
++        for (size_t i = 0; i < authority_length; i++) {
++            url.push_back(static_cast<char>(binary_request[offset + 1 + i]));
++        }
++        offset += 1 + authority_length; // Skip authority length and authority
++        size_t path_length = binary_request[offset];
++        for (size_t i = 0; i < path_length; i++) {
++            url.push_back(static_cast<char>(binary_request[offset + 1 + i]));
++        }
++        return url;
++    }
++
++    std::string get_method_from_binary_request(const std::vector<uint8_t>& binary_request) {
++        std::string method;
++        size_t method_len = binary_request[1];
++        for (size_t i = 2; i < 2 + method_len; i++) {
++            method.push_back(static_cast<char>(binary_request[i]));
++        }
++        return method;
++    }
++
++    std::string get_body_from_binary_request(const std::vector<uint8_t>& binary_request) {
++        std::string body;
++        int offset = 0;
++        offset += 1; // Skip framing indicator
++        offset += 1 + binary_request[offset]; // Skip method
++        offset += 1 + binary_request[offset]; // Skip scheme
++        offset += 1 + binary_request[offset]; // Skip authority
++        offset += 1 + binary_request[offset]; // Skip path
++        offset += 1 + binary_request[offset]; // Skip header section
++        size_t body_length = binary_request[offset];
++        for (size_t i = 1; i <= body_length; i++) {
++            body.push_back(static_cast<char>(binary_request[offset + i]));
++        }
++        return body;
++    }
++
 +    // TODO: Support configurable relay/gateway/keys.
-+    std::vector<uint8_t> get_encapsulated_request(const std::string& path, const std::string& host, const std::string& body, uint8_t* pkR, size_t pkR_len) {
++    std::vector<uint8_t> get_encapsulated_request(
++      OHTTP_HPKE_CTX* sender_context,
++      const std::string& method,
++      const std::string& scheme,
++      const std::string& host,
++      const std::string& path,
++      const std::string& body,
++      uint8_t* client_enc,
++      size_t* client_enc_len,
++      uint8_t* pkR,
++      size_t pkR_len) {
 +        // Hard coded key config matching ohttp-gateway.jthess.com's
 +        // public key.
 +
 +        // Key ID (8 bit)                 80
-+        // HPKE KEM ID (16)               0020 
-+        // HPKE Public Key (8*Npk=8*32)   ea0060b17d5c7216e6f7d22ba14e337e6602b96d3435b6445b09180880edf81d
++        // HPKE KEM ID (16)               0020 	DHKEM(X25519, HKDF-SHA256)
++        // HPKE Public Key (8*Npk=8*32)   7a04f3070f2fc4c52c06eb373060b415dbd8e82effe4088965a2602c27b91646
 +        // HPKE Symmetric Algos Len (16)  0004
 +        // HPKE Symmetric algorithms (32) 
-+        //   HPKE KDF ID                  0001
-+        //   HPKE AEAD ID                 0001
++        //   HPKE KDF ID                  0001 // HKDF-SHA256	
++        //   HPKE AEAD ID                 0001 // AES-128-GCM	
 +
 +        // Plaintext:
-+        std::vector<uint8_t> binary_request = get_binary_request(path, host, body);
++        std::vector<uint8_t> binary_request = get_binary_request(method, scheme, host, path, body);
 +
 +        // Info
 +        // Build a sequence of bytes (info) by concatenating the ASCII-encoded
@@ -499,18 +912,11 @@ index 0000000000000..0bef527f86e7c
 +        // Ciphertext & Friends:
 +        std::vector<uint8_t> encapsulated_request;  // will be aad + enc + ct
 +
-+        // Create a context
-+        bssl::ScopedEVP_HPKE_CTX sender_context;
-+
-+        // Ephemeral public key
-+        uint8_t enc[EVP_HPKE_MAX_ENC_LENGTH];
-+        size_t enc_len;
-+
 +        int rv = EVP_HPKE_CTX_setup_sender(
-+            /* *ctx */ sender_context.get(),
-+            /* *out_enc */ enc,
-+            /* *out_enc_len */ &enc_len,
-+            /*  max_enc */ sizeof(enc),
++            /* *ctx */ sender_context->internal_ctx,
++            /* *out_enc */ client_enc,
++            /* *out_enc_len */ client_enc_len,
++            /*  max_enc */ EVP_HPKE_MAX_ENC_LENGTH,
 +            /* *kem */ EVP_hpke_x25519_hkdf_sha256(),  // We want 0x0020, DHKEM(X25519, HKDF-SHA256);	see: https://www.iana.org/assignments/hpke/hpke.xhtml
 +            /* *kdf */ EVP_hpke_hkdf_sha256(),         // 0x0001, HKDF-SHA256
 +            /* *aead */ EVP_hpke_aes_128_gcm(),        // 0x0001, AES-128-GCM
@@ -525,7 +931,7 @@ index 0000000000000..0bef527f86e7c
 +
 +        // Have sender encrypt message for the recipient.
 +        int ct_max_len = binary_request.size() +
-+            EVP_HPKE_CTX_max_overhead(sender_context.get());
++            EVP_HPKE_CTX_max_overhead(sender_context->internal_ctx);
 +        std::vector<uint8_t> ciphertext(ct_max_len);
 +        size_t ciphertext_len;
 +        std::vector<uint8_t> aad = {
@@ -535,7 +941,7 @@ index 0000000000000..0bef527f86e7c
 +            0x00, 0x01, // AEAD ID
 +        };
 +        rv = EVP_HPKE_CTX_seal(
-+            /* *ctx */ sender_context.get(),
++            /* *ctx */ sender_context->internal_ctx,
 +            /* *out */ ciphertext.data(),
 +            /* *out_len */ &ciphertext_len,
 +            /*  max_out_len */ ciphertext.size(),
@@ -551,18 +957,293 @@ index 0000000000000..0bef527f86e7c
 +        // Per RFC 9292, the encapsulated request is the concatenation of the
 +        // aad, enc, and ciphertext.
 +        encapsulated_request.insert(encapsulated_request.end(), aad.begin(), aad.end());
-+        encapsulated_request.insert(encapsulated_request.end(), enc, enc + enc_len);
++        encapsulated_request.insert(encapsulated_request.end(), client_enc, client_enc + *client_enc_len);
 +        encapsulated_request.insert(encapsulated_request.end(), ciphertext.begin(), ciphertext.begin() + ciphertext_len);
 +
 +        return encapsulated_request;
 +    }
 +
++    std::vector<uint8_t> encapsulate_response(
++        OHTTP_HPKE_CTX* receiver_context,
++        uint8_t* enc,
++        size_t enc_len,
++        const int response_code,
++        const std::string& response_body) {
++      std::vector<uint8_t> binary_response = get_binary_response(
++          response_code,
++          std::vector<uint8_t>(response_body.begin(), response_body.end()));
++      
++      // random(max(Nn, Nk))
++      size_t secret_len = 16;
++      std::vector<uint8_t> secret(secret_len);
++      std::string context_str = "message/bhttp response";
++      std::vector<uint8_t> context = std::vector<uint8_t>(context_str.begin(), context_str.end());
++      size_t context_len = context.size();
++      int rv = EVP_HPKE_CTX_export(
++        /* *ctx */ receiver_context->internal_ctx,
++        /* *out */ secret.data(),
++        /*  secret_len */ secret_len,
++        /* *context */ context.data(),
++        /*  context_len */ context_len
++      );
++      if (rv != 1) {
++        return {};
++      }
++
++      // Nonce of secret_len
++      std::vector<uint8_t> response_nonce(secret_len);
++      RAND_bytes(response_nonce.data(), secret_len);
++
++      // salt = concat(enc, response_nonce);
++      std::vector<uint8_t> salt(enc, enc + enc_len);
++      salt.insert(salt.end(), response_nonce.begin(), response_nonce.end());
++
++      // prk = Extract(salt, secret)
++      size_t prk_len;
++      uint8_t prk[EVP_MAX_MD_SIZE];
++      int rv2 = HKDF_extract(
++        /* *out_key */ prk,
++        /* *out_len */ &prk_len,
++        /* *digest */ EVP_sha256(),
++        /* *secret */ secret.data(),
++        /*  secret_len */ secret_len,
++        /* *salt */ salt.data(),
++        /*  salt_len */ salt.size()
++      );
++      if (rv2 != 1) {
++        return {};
++      }
++
++      // aead_key = Expand(prk, "key", Nk)
++      size_t aead_key_len = 16; // Nk
++      uint8_t aead_key[aead_key_len];
++      std::string info_key_str = "key";
++      uint8_t info_key[info_key_str.size()];
++      for (size_t i = 0; i < info_key_str.size(); i++) {
++        info_key[i] = info_key_str[i];
++      }
++      size_t info_key_len = sizeof(info_key);
++      int rv3 = HKDF_expand(
++        /* *out */ aead_key,
++        /*  out_len */ aead_key_len,
++        /* *digest */ EVP_sha256(),
++        /* *prk */ prk,
++        /*  prk_len */ prk_len,
++        /* *info */ info_key,
++        /*  info_len */ info_key_len
++      );
++      if (rv3 != 1) {
++        return {};
++      }
++
++      // aead_nonce = Expand(prk, "nonce", Nn)
++      size_t aead_nonce_len = 12; // Nn
++      uint8_t aead_nonce[aead_nonce_len];
++      std::string info_nonce_str = "nonce";
++      uint8_t info_nonce[info_nonce_str.size()];
++      for (size_t i = 0; i < info_nonce_str.size(); i++) {
++        info_nonce[i] = info_nonce_str[i];
++      }
++      size_t info_nonce_len = sizeof(info_nonce);
++      int rv4 = HKDF_expand(
++        /* *out */ aead_nonce,
++        /*  out_len */ aead_nonce_len,
++        /* *digest */ EVP_sha256(),
++        /* *prk */ prk,
++        /*  prk_len */ prk_len,
++        /* *info */ info_nonce,
++        /*  info_len */ info_nonce_len
++      );
++      if (rv4 != 1) {
++        return {};
++      }
++  
++      // ct = Seal(aead_key, aead_nonce, "", response)
++      const EVP_AEAD* aead = EVP_aead_aes_128_gcm();
++      EVP_AEAD_CTX *aead_ctx = EVP_AEAD_CTX_new(
++        /* *aead */ aead,
++        /* *key */ aead_key,
++        /*  key_len */ aead_key_len,
++        /*  tag_len */ EVP_AEAD_DEFAULT_TAG_LENGTH
++      );
++
++      size_t max_ct_len = binary_response.size() + EVP_AEAD_max_overhead(aead);
++      uint8_t ct[max_ct_len];
++      size_t ct_len;
++      size_t required_len = EVP_AEAD_nonce_length(aead);
++      if (required_len != aead_nonce_len) {
++        std::cout << "Nonce length mismatch, expected: " << required_len << "; got: " << aead_nonce_len << std::endl;
++        return {};
++      }
++      int rv5 = EVP_AEAD_CTX_seal(
++        /* *ctx */ aead_ctx,
++        /* *out */ ct,
++        /* *out_len */ &ct_len,
++        /*  max_out_len */ max_ct_len,
++        /* *nonce */ aead_nonce,
++        /*  nonce_len */ aead_nonce_len,
++        /* *in */ binary_response.data(),
++        /*  in_len */ binary_response.size(),
++        /* *ad */ nullptr,
++        /*  ad_len */ 0
++      );
++      if (rv5 != 1) {
++        return {};
++      }
++
++      // enc_response = concat(response_nonce, ct)
++      std::vector<uint8_t> enc_response;
++      enc_response.insert(enc_response.end(), response_nonce.begin(), response_nonce.end());
++      enc_response.insert(enc_response.end(), ct, ct + ct_len);
++
++      return enc_response;
++    }
++
++    DecapsulationErrorCode decapsulate_response(
++        OHTTP_HPKE_CTX* sender_context,
++        uint8_t* enc,
++        size_t enc_len,
++        std::vector<uint8_t> eresponse,
++        uint8_t* dresponse,
++        size_t* dresponse_len,
++        size_t max_drequest_len) {
++      // Separate into nonce and ciphertext
++      if (eresponse.size() < 12) {
++        std::cout << "return DecapsulationErrorCode::ERR_NO_AEAD_NONCE" << std::endl;
++        return DecapsulationErrorCode::ERR_NO_AEAD_NONCE;
++      }
++      std::vector<uint8_t> response_nonce(eresponse.begin(), eresponse.begin() + 16);
++      std::vector<uint8_t> ct(eresponse.begin() + 16, eresponse.end());
++      
++      size_t secret_len = 16;
++      std::vector<uint8_t> secret(secret_len);
++      std::string context_str = "message/bhttp response";
++      std::vector<uint8_t> context = std::vector<uint8_t>(context_str.begin(), context_str.end());
++      size_t context_len = context.size();
++      int rv = EVP_HPKE_CTX_export(
++        /* *ctx */ sender_context->internal_ctx,
++        /* *out */ secret.data(),
++        /*  secret_len */ secret_len,
++        /* *context */ context.data(),
++        /*  context_len */ context_len
++      );
++      if (rv != 1) {
++        std::cout << "return DecapsulationErrorCode::ERR_NO_SECRET" << std::endl;
++        return DecapsulationErrorCode::ERR_NO_SECRET;
++      }
++
++      // salt = concat(enc, response_nonce);
++      std::vector<uint8_t> salt(enc, enc + enc_len);
++      salt.insert(salt.end(), response_nonce.begin(), response_nonce.end());
++
++      // prk = Extract(salt, secret)
++      size_t prk_len;
++      uint8_t prk[EVP_MAX_MD_SIZE];
++      int rv2 = HKDF_extract(
++        /* *out_key */ prk,
++        /* *out_len */ &prk_len,
++        /* *digest */ EVP_sha256(),
++        /* *secret */ secret.data(),
++        /*  secret_len */ secret_len,
++        /* *salt */ salt.data(),
++        /*  salt_len */ salt.size()
++      );
++      if (rv2 != 1) {
++        std::cout << "return DecapsulationErrorCode::ERR_NO_PRK" << std::endl;
++        return DecapsulationErrorCode::ERR_NO_PRK;
++      }
++
++      // aead_key = Expand(prk, "key", Nk)
++      size_t aead_key_len = 16; // Nk
++      uint8_t aead_key[aead_key_len];
++      std::string info_key_str = "key";
++      uint8_t info_key[info_key_str.size()];
++      for (size_t i = 0; i < info_key_str.size(); i++) {
++        info_key[i] = info_key_str[i];
++      }
++      size_t info_key_len = sizeof(info_key);
++      int rv3 = HKDF_expand(
++        /* *out */ aead_key,
++        /*  out_len */ aead_key_len,
++        /* *digest */ EVP_sha256(),
++        /* *prk */ prk,
++        /*  prk_len */ prk_len,
++        /* *info */ info_key,
++        /*  info_len */ info_key_len
++      );
++      if (rv3 != 1) {
++        std::cout << "return DecapsulationErrorCode::ERR_NO_AEAD_KEY" << std::endl;
++        return DecapsulationErrorCode::ERR_NO_AEAD_KEY;
++      }
++
++      // aead_nonce = Expand(prk, "nonce", Nn)
++      size_t aead_nonce_len = 12; // Nn
++      uint8_t aead_nonce[aead_nonce_len];
++      std::string info_nonce_str = "nonce";
++      uint8_t info_nonce[info_nonce_str.size()];
++      for (size_t i = 0; i < info_nonce_str.size(); i++) {
++        info_nonce[i] = info_nonce_str[i];
++      }
++      size_t info_nonce_len = sizeof(info_nonce);
++      int rv4 = HKDF_expand(
++        /* *out */ aead_nonce,
++        /*  out_len */ aead_nonce_len,
++        /* *digest */ EVP_sha256(),
++        /* *prk */ prk,
++        /*  prk_len */ prk_len,
++        /* *info */ info_nonce,
++        /*  info_len */ info_nonce_len
++      );
++      if (rv4 != 1) {
++        std::cout << "return DecapsulationErrorCode::ERR_NO_AEAD_NONCE" << std::endl;
++        return DecapsulationErrorCode::ERR_NO_AEAD_NONCE;
++      }
++      const EVP_AEAD* aead = EVP_aead_aes_128_gcm();
++      EVP_AEAD_CTX *aead_ctx = EVP_AEAD_CTX_new(
++        /* *aead */ aead,
++        /* *key */ aead_key,
++        /*  key_len */ aead_key_len,
++        /*  tag_len */ EVP_AEAD_DEFAULT_TAG_LENGTH
++      );
++      size_t max_pt_len = eresponse.size();
++      uint8_t pt[max_pt_len];
++      size_t pt_len;
++      int rv5 = EVP_AEAD_CTX_open(
++        /* *ctx */ aead_ctx,
++        /* *out */ pt,
++        /* *out_len */ &pt_len,
++        /*  max_out_len */ max_pt_len,
++        /* *nonce */ aead_nonce,
++        /*  nonce_len */ aead_nonce_len,
++        /* *in */ ct.data(),
++        /*  in_len */ ct.size(),
++        /* *ad */ nullptr,
++        /*  ad_len */ 0
++      );
++      if (rv5 != 1) {
++        return DecapsulationErrorCode::ERR_UNABLE_TO_OPEN_RESPONSE;
++      }
++
++      // Set the values the caller expects.
++      if (pt_len > max_drequest_len) {
++        std::cout << "return DecapsulationErrorCode::ERR_NO_BUFFER_SPACE" << std::endl;
++        return DecapsulationErrorCode::ERR_NO_BUFFER_SPACE;
++      }
++      *dresponse_len = pt_len;
++      std::copy(pt, pt + pt_len, dresponse);
++
++      return DecapsulationErrorCode::SUCCESS;
++    }
++
 +    DecapsulationErrorCode decapsulate_request(
++        OHTTP_HPKE_CTX* receiver_context,
 +        std::vector<uint8_t> erequest,
 +        uint8_t* drequest,
 +        size_t* drequest_len,
++        uint8_t* enc,
++        size_t enc_len,
 +        size_t max_drequest_len,
-+        EVP_HPKE_KEY recipient_keypair) {
++        OHTTP_HPKE_KEY* recipient_keypair) {
 +
 +      // Break the request into 3 parts: AAD, ephemeral public key, and 
 +      // ciphertext.
@@ -580,10 +1261,9 @@ index 0000000000000..0bef527f86e7c
 +      if (erequest.size() < 39) {
 +        return DecapsulationErrorCode::ERR_NO_PUBLIC_KEY;
 +      }
-+      size_t enc_len = 32;  // Hardcoded for now.
-+      std::vector<uint8_t> enc;
-+      for (size_t i = 7; i < 7 + enc_len; i++) {
-+        enc.push_back(erequest[i]);
++      enc_len = 32;  // Hardcoded for now.
++      for (size_t i = 7; i < 39; i++) {
++        enc[i - 7] = erequest[i];
 +      }
 +
 +      // The rest is the ciphertext.
@@ -608,15 +1288,13 @@ index 0000000000000..0bef527f86e7c
 +      info.push_back(0x00); info.push_back(0x01); // KDF ID
 +      info.push_back(0x00); info.push_back(0x01); // AEAD ID
 +      
-+      // Create a context
-+      bssl::ScopedEVP_HPKE_CTX receiver_context;
 +      int rv2 = EVP_HPKE_CTX_setup_recipient(
-+        /* *ctx */ receiver_context.get(),
-+        /* *key */ &recipient_keypair,
++        /* *ctx */ receiver_context->internal_ctx,
++        /* *key */ recipient_keypair->internal_key,
 +        /* *kdf */ EVP_hpke_hkdf_sha256(),
 +        /* *aead */ EVP_hpke_aes_128_gcm(),
-+        /* *enc */ enc.data(),
-+        /*  enc_len */ enc.size(),
++        /* *enc */ enc,
++        /*  enc_len */ enc_len,
 +        /* *info */ info.data(),
 +        /*  info_len */ info.size()
 +      );
@@ -625,7 +1303,7 @@ index 0000000000000..0bef527f86e7c
 +      }
 +
 +      int rv3 = EVP_HPKE_CTX_open(
-+        /* *ctx */ receiver_context.get(),
++        /* *ctx */ receiver_context->internal_ctx,
 +        /* *out */ drequest,
 +        /* *out_len */ drequest_len,
 +        /*  max_out_len */ max_drequest_len,
@@ -644,48 +1322,117 @@ index 0000000000000..0bef527f86e7c
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp.h b/third_party/ohttp/ohttp.h
 new file mode 100644
-index 0000000000000..bd7b365362fc0
+index 0000000000000..fc1bce6851e95
 --- /dev/null
 +++ b/third_party/ohttp/ohttp.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,111 @@
 +// Sketch of OHTTP implementation
 +
 +#ifndef OHTTP_H
 +#define OHTTP_H
 +
++// We hide exports to avoid exposing BoringSSL symbols
++// So, we need to export our own symbols
++#if defined _WIN32 || defined __CYGWIN__
++    #define OHTTP_EXPORT __declspec(dllexport)
++#else
++    #define OHTTP_EXPORT __attribute__((visibility("default")))
++#endif
++
 +#include <cassert>
 +#include <string>
 +#include <vector>
 +
-+#include "third_party/boringssl/src/include/openssl/hpke.h"
-+
 +
 +namespace ohttp {
-+    enum class DecapsulationErrorCode {
++
++    // Wrappers for BoringSSL types
++    struct OHTTP_HPKE_CTX;
++    struct OHTTP_HPKE_KEY;
++    struct OHTTP_HPKE_KEM;
++    OHTTP_EXPORT OHTTP_HPKE_CTX* createHpkeContext();
++    OHTTP_EXPORT void destroyHpkeContext(OHTTP_HPKE_CTX* ctx);
++
++    OHTTP_EXPORT OHTTP_HPKE_KEY* createHpkeKey();
++    OHTTP_EXPORT void destroyHpkeKey(OHTTP_HPKE_KEY* key);
++
++    OHTTP_EXPORT OHTTP_HPKE_KEM* createHpkeKem();
++    OHTTP_EXPORT void destroyHpkeKem(OHTTP_HPKE_KEM* kem);
++
++    OHTTP_EXPORT int OHTTP_HPKE_KEY_generate(OHTTP_HPKE_KEY* key, const OHTTP_HPKE_KEM* kem);
++    OHTTP_EXPORT bool OHTTP_HPKE_KEY_public_key(OHTTP_HPKE_KEY* key, uint8_t* out, size_t* out_len, size_t max_out);
++
++    OHTTP_EXPORT extern const int OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH;
++    OHTTP_EXPORT extern const int OHTTP_HPKE_MAX_ENC_LENGTH;
++
++    enum class OHTTP_EXPORT DecapsulationErrorCode {
 +        SUCCESS = 0,
 +        ERR_NO_ENCAPSULATED_HEADER,
 +        ERR_NO_PUBLIC_KEY,
 +        ERR_NO_CIPHER_TEXT,
 +        ERR_NO_CONTEXT_CREATED,
 +        ERR_UNABLE_TO_OPEN,
++        ERR_NO_AEAD_NONCE,
++        ERR_NO_BUFFER_SPACE,
++        ERR_NO_SECRET,
++        ERR_NO_PRK,
++        ERR_NO_AEAD_KEY,
++        ERR_UNABLE_TO_OPEN_RESPONSE
 +    };
-+    enum class OhttpParseErrorCode {
++    OHTTP_EXPORT inline std::string DecapsulationErrorCodeToString(DecapsulationErrorCode code) {
++        switch (code) {
++            case DecapsulationErrorCode::SUCCESS: return "SUCCESS";
++            case DecapsulationErrorCode::ERR_NO_ENCAPSULATED_HEADER: return "ERR_NO_ENCAPSULATED_HEADER";
++            case DecapsulationErrorCode::ERR_NO_PUBLIC_KEY: return "ERR_NO_PUBLIC_KEY";
++            case DecapsulationErrorCode::ERR_NO_CIPHER_TEXT: return "ERR_NO_CIPHER_TEXT";
++            case DecapsulationErrorCode::ERR_NO_CONTEXT_CREATED: return "ERR_NO_CONTEXT_CREATED";
++            case DecapsulationErrorCode::ERR_UNABLE_TO_OPEN: return "ERR_UNABLE_TO_OPEN";
++            case DecapsulationErrorCode::ERR_NO_AEAD_NONCE: return "ERR_NO_AEAD_NONCE";
++            case DecapsulationErrorCode::ERR_NO_BUFFER_SPACE: return "ERR_NO_BUFFER_SPACE";
++            case DecapsulationErrorCode::ERR_NO_SECRET: return "ERR_NO_SECRET";
++            case DecapsulationErrorCode::ERR_NO_PRK: return "ERR_NO_PRK";
++            case DecapsulationErrorCode::ERR_NO_AEAD_KEY: return "ERR_NO_AEAD_KEY";
++            case DecapsulationErrorCode::ERR_UNABLE_TO_OPEN_RESPONSE: return "ERR_UNABLE_TO_OPEN_RESPONSE";
++            default: return "Unknown error code";
++        }
++    }
++    enum class OHTTP_EXPORT OhttpParseErrorCode {
 +        SUCCESS = 0,
 +        ERR_BAD_OFFSET,
 +    };
++    OHTTP_EXPORT inline std::string OhttpParseErrorCodeToString(OhttpParseErrorCode code) {
++        switch (code) {
++            case OhttpParseErrorCode::SUCCESS: return "SUCCESS";
++            case OhttpParseErrorCode::ERR_BAD_OFFSET: return "ERR_BAD_OFFSET";
++            default: return "Unknown error code";
++        }
++    }
 +
-+    // A function that simply returns the string "foo"
-+    const char* GetFoo();
++    OHTTP_EXPORT std::vector<uint8_t> generate_key_config(OHTTP_HPKE_KEY *keypair);
 +
-+    std::vector<uint8_t> encode_string(const std::string& str);
++    OHTTP_EXPORT std::vector<uint8_t> get_public_key(std::vector<uint8_t> key_config);
 +
-+    OhttpParseErrorCode get_next_encoded_string(std::vector<uint8_t>& input, int offset, std::vector<uint8_t>& out, int& bytes_used);
++    OHTTP_EXPORT std::vector<uint8_t> encode_string(const std::string& str);
 +
-+    std::vector<uint8_t> get_binary_request(const std::string& path, const std::string& host, const std::string& body);
++    OHTTP_EXPORT OhttpParseErrorCode get_next_encoded_string(std::vector<uint8_t>& input, int offset, std::vector<uint8_t>& out, int& bytes_used);
++
++    OHTTP_EXPORT std::vector<uint8_t> get_binary_request(const std::string& method, const std::string& scheme, const std::string& host, const std::string& path, const std::string& body);
++
++    OHTTP_EXPORT std::vector<uint8_t> get_binary_response(const int response_code, const std::vector<uint8_t>& content);
 +    
-+    std::vector<uint8_t> get_encapsulated_request(const std::string& path, const std::string& host, const std::string& body, uint8_t* pkR, size_t pkR_len);
++    OHTTP_EXPORT std::string get_url_from_binary_request(const std::vector<uint8_t>& binary_request);
 +
-+    DecapsulationErrorCode decapsulate_request(std::vector<uint8_t> erequest, uint8_t* drequest, size_t* drequest_len, size_t max_drequest_len, EVP_HPKE_KEY recipient_keypair);
++    OHTTP_EXPORT std::string get_method_from_binary_request(const std::vector<uint8_t>& binary_request);
++
++    OHTTP_EXPORT std::string get_body_from_binary_request(const std::vector<uint8_t>& binary_request);
++
++    OHTTP_EXPORT std::vector<uint8_t> get_encapsulated_request(OHTTP_HPKE_CTX* sender_context, const std::string& method, const std::string& scheme, const std::string& host, const std::string& path, const std::string& body, uint8_t* client_enc, size_t* client_enc_len, uint8_t* pkR, size_t pkR_len);
++
++    OHTTP_EXPORT std::vector<uint8_t> encapsulate_response(OHTTP_HPKE_CTX* reciever_context, uint8_t* enc, size_t enc_len, const int response_code, const std::string& response_body);
++
++    OHTTP_EXPORT DecapsulationErrorCode decapsulate_request(OHTTP_HPKE_CTX* receiver_context, std::vector<uint8_t> erequest, uint8_t* drequest, size_t* drequest_len, uint8_t* enc, size_t enc_len, size_t max_drequest_len, OHTTP_HPKE_KEY* recipient_keypair);
++    
++    OHTTP_EXPORT DecapsulationErrorCode decapsulate_response(OHTTP_HPKE_CTX* sender_context, uint8_t* enc, size_t enc_len, std::vector<uint8_t> eresponse, uint8_t* dresponse, size_t* dresponse_len, size_t max_drequest_len);
 +
 +} // namespace ohttp
 +
@@ -693,119 +1440,51 @@ index 0000000000000..bd7b365362fc0
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp_test.cc b/third_party/ohttp/ohttp_test.cc
 new file mode 100644
-index 0000000000000..ae756890a5243
+index 0000000000000..3f9cd26e4cf93
 --- /dev/null
 +++ b/third_party/ohttp/ohttp_test.cc
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,394 @@
 +#include <vector>
 +
-+#include "testing/gtest/include/gtest/gtest.h"
++#include "gtest/gtest.h"
 +
-+#include "third_party/boringssl/src/include/openssl/hpke.h"
-+#include "third_party/ohttp/ohttp.h"
-+#include "third_party/boringssl/src/crypto/test/test_util.h" // Bytes
++#include "ohttp.h"
 +
 +namespace {
 +
-+EVP_HPKE_KEY getKeys() {
++ohttp::OHTTP_HPKE_KEY* getKeys() {
 +  // Use a newly derived keypair to do a roundtrip.
-+  EVP_HPKE_KEY *test_keypair = EVP_HPKE_KEY_new();
-+  const EVP_HPKE_KEM *kem = EVP_hpke_x25519_hkdf_sha256();
-+  int rv = EVP_HPKE_KEY_generate(test_keypair, kem);
++  ohttp::OHTTP_HPKE_KEY* test_keypair = ohttp::createHpkeKey();
++  const ohttp::OHTTP_HPKE_KEM* kem = ohttp::createHpkeKem();
++  int rv = ohttp::OHTTP_HPKE_KEY_generate(test_keypair, kem);
 +  EXPECT_EQ(rv, 1); // Check if key generation was successful
-+  return *test_keypair;
++  return test_keypair;
 +}
 +
-+// Exercise the HPKE library without testing our code just as
-+// as a proof of concept to compare our code against.
-+TEST(OhttpTest, TestVector1) {
-+  const EVP_HPKE_KEM *kem = EVP_hpke_x25519_hkdf_sha256();    // 32
-+  const EVP_HPKE_KDF *kdf = EVP_hpke_hkdf_sha256();           // 1
-+  const EVP_HPKE_AEAD *aead = EVP_hpke_aes_128_gcm();         // 1
++TEST(OhttpTest, GetKeyConfig) {
++  ohttp::OHTTP_HPKE_KEY* keypair = getKeys();
++  std::vector<uint8_t> key_config = ohttp::generate_key_config(keypair);
 +
-+  EXPECT_TRUE(aead);
-+  EXPECT_TRUE(kdf);
++  // 2 byte length plus one config
++  EXPECT_EQ(key_config.size(), size_t(2 + 1 + 2 + 32 + 2 + 4));
 +
-+  // Recipient keypair
-+  std::vector<uint8_t> public_key_r_ = {0x39, 0x48, 0xcf, 0xe0, 0xad, 0x1d, 0xdb, 0x69, 0x5d, 0x78, 0x0e, 0x59, 0x07, 0x71, 0x95, 0xda, 0x6c, 0x56, 0x50, 0x6b, 0x02, 0x73, 0x29, 0x79, 0x4a, 0xb0, 0x2b, 0xca, 0x80, 0x81, 0x5c, 0x4d};
-+  std::vector<uint8_t> secret_key_r_ = {0x46, 0x12, 0xc5, 0x50, 0x26, 0x3f, 0xc8, 0xad, 0x58, 0x37, 0x5d, 0xf3, 0xf5, 0x57, 0xaa, 0xc5, 0x31, 0xd2, 0x68, 0x50, 0x90, 0x3e, 0x55, 0xa9, 0xf2, 0x3f, 0x21, 0xd8, 0x53, 0x4e, 0x8a, 0xc8};
++  // First 2 bytes are remaining length
++  EXPECT_EQ(key_config[0], 0);
++  EXPECT_EQ(key_config[1], 1 + 2 + 32 + 2 + 4);
++}
 +
-+  std::vector<uint8_t> info_ = {0x44, 0x20, 0x65, 0x20, 0x6f, 0x6e, 0x20, 0x61, 0x20, 0x47, 0x72, 0x65, 0x63, 0x69, 0x61, 0x6e, 0x20, 0x55, 0x72, 0x6e};
-+  
-+  // First round
-+  std::vector<uint8_t> aad = {0x43, 0x6f, 0x75, 0x6e, 0x74, 0x2d, 0x30}; 
-+  std::vector<uint8_t> ct = {0xf9, 0x38, 0x55, 0x8b, 0x5d, 0x72, 0xf1, 0xa2, 0x38, 0x10, 0xb4, 0xbe, 0x2a, 0xb4, 0xf8, 0x43, 0x31, 0xac, 0xc0, 0x2f, 0xc9, 0x7b, 0xab, 0xc5, 0x3a, 0x52, 0xae, 0x82, 0x18, 0xa3, 0x55, 0xa9, 0x6d, 0x87, 0x70, 0xac, 0x83, 0xd0, 0x7b, 0xea, 0x87, 0xe1, 0x3c, 0x51, 0x2a};
-+  std::vector<uint8_t> nonce = {0x56, 0xd8, 0x90, 0xe5, 0xac, 0xca, 0xaf, 0x01, 0x1c, 0xff, 0x4b, 0x7d};
-+  std::vector<uint8_t> pt = {0x42, 0x65, 0x61, 0x75, 0x74, 0x79, 0x20, 0x69, 0x73, 0x20, 0x74, 0x72, 0x75, 0x74, 0x68, 0x2c, 0x20, 0x74, 0x72, 0x75, 0x74, 0x68, 0x20, 0x62, 0x65, 0x61, 0x75, 0x74, 0x79};
-+  
-+  // Ephemeral keys
-+  std::vector<uint8_t> secret_key_e_ = {0x52, 0xc4, 0xa7, 0x58, 0xa8, 0x02, 0xcd, 0x8b, 0x93, 0x6e, 0xce, 0xea, 0x31, 0x44, 0x32, 0x79, 0x8d, 0x5b, 0xaf, 0x2d, 0x7e, 0x92, 0x35, 0xdc, 0x08, 0x4a, 0xb1, 0xb9, 0xcf, 0xa2, 0xf7, 0x36};
-+  std::vector<uint8_t> public_key_e_ = {0x37, 0xfd, 0xa3, 0x56, 0x7b, 0xdb, 0xd6, 0x28, 0xe8, 0x86, 0x68, 0xc3, 0xc8, 0xd7, 0xe9, 0x7d, 0x1d, 0x12, 0x53, 0xb6, 0xd4, 0xea, 0x6d, 0x44, 0xc1, 0x50, 0xf7, 0x41, 0xf1, 0xbf, 0x44, 0x31};
-+
-+  bssl::ScopedEVP_HPKE_CTX sender_ctx;
-+  uint8_t enc[EVP_HPKE_MAX_ENC_LENGTH];  // len is 32
-+  size_t enc_len;
-+  // Like our usual setup, but with known seed in secrect_key_e_.
-+  EXPECT_TRUE(EVP_HPKE_CTX_setup_sender_with_seed_for_testing(
-+      sender_ctx.get(), enc, &enc_len, sizeof(enc), kem, kdf, aead,
-+      public_key_r_.data(), public_key_r_.size(), info_.data(), info_.size(),
-+      secret_key_e_.data(), secret_key_e_.size()));
-+
-+  std::vector<uint8_t> enc_vec(enc, enc + enc_len);
-+  EXPECT_EQ(enc_vec, public_key_e_);
-+
-+  // Verify first output
-+  std::vector<uint8_t> encrypted(pt.size() + EVP_HPKE_CTX_max_overhead(sender_ctx.get()));
-+  size_t encrypted_len;
-+  EXPECT_EQ(1, EVP_HPKE_CTX_seal(sender_ctx.get(), encrypted.data(), &encrypted_len,
-+                                 encrypted.size(), pt.data(),
-+                                 pt.size(), aad.data(),
-+                                 aad.size()));
-+  std::vector<uint8_t> encrypted_vec(encrypted.data(), encrypted.data() + encrypted_len);
-+  // EXPECT_EQ(encrypted_vec, ct);
-+
-+  // Test the recipient.
-+  bssl::ScopedEVP_HPKE_KEY base_key;
-+  ASSERT_TRUE(EVP_HPKE_KEY_init(base_key.get(), kem, secret_key_r_.data(),
-+                                secret_key_r_.size()));
-+
-+  const EVP_HPKE_KEY *key = base_key.get();
-+
-+  uint8_t public_key[EVP_HPKE_MAX_PUBLIC_KEY_LENGTH];
++TEST(OhttpTest, ExtractPublicKeyFromConfig) {
++  ohttp::OHTTP_HPKE_KEY* keypair = getKeys();
++  uint8_t public_key[ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH];
 +  size_t public_key_len;
-+  EXPECT_TRUE(EVP_HPKE_KEY_public_key(key, public_key, &public_key_len,
-+                                      sizeof(public_key)));
++  EXPECT_TRUE(ohttp::OHTTP_HPKE_KEY_public_key(keypair, public_key, &public_key_len, sizeof(public_key)));
 +  std::vector<uint8_t> public_key_vec(public_key, public_key + public_key_len);
-+  EXPECT_EQ(public_key_vec, public_key_r_);
 +
-+  // Now the same with the private key
-+  uint8_t secret_key[EVP_HPKE_MAX_PRIVATE_KEY_LENGTH];
-+  size_t secret_key_len;
-+  EXPECT_TRUE(EVP_HPKE_KEY_private_key(key, secret_key, &secret_key_len,
-+                                       sizeof(secret_key)));
-+  std::vector<uint8_t> secret_key_vec(secret_key, secret_key + secret_key_len);
-+  EXPECT_EQ(secret_key_vec, secret_key_r_);
++  std::vector<uint8_t> key_config = ohttp::generate_key_config(keypair);
++  std::vector<uint8_t> config_public_key = ohttp::get_public_key(key_config);
 +
-+  // Set up the recipient
-+  bssl::ScopedEVP_HPKE_CTX recipient_ctx;
-+  EXPECT_TRUE(EVP_HPKE_CTX_setup_recipient(recipient_ctx.get(), key, kdf,
-+                                           aead, enc, enc_len, info_.data(),
-+                                           info_.size()));
-+
-+  // Verify Decryption
-+  std::vector<uint8_t> decrypted(ct.size());
-+  size_t decrypted_len;
-+  EXPECT_EQ(1, EVP_HPKE_CTX_open(recipient_ctx.get(), decrypted.data(),
-+                                  &decrypted_len, decrypted.size(),
-+                                  encrypted.data(), encrypted_len, aad.data(),
-+                                  aad.size()));
-+  std::vector<uint8_t> decrypted_vec(decrypted.data(), decrypted.data() + decrypted_len);
-+  EXPECT_EQ(decrypted_vec, pt);
-+}
-+
-+// Test a sample function to make sure build is setup correctly.
-+TEST(OhttpTest, TestOHTTPDetected) {
-+  EXPECT_EQ(ohttp::GetFoo(), "foo");
++  EXPECT_EQ(config_public_key.size(), size_t(32));
++  EXPECT_EQ(config_public_key, public_key_vec);
 +}
 +
 +// Test encoding strings.
@@ -837,7 +1516,7 @@ index 0000000000000..ae756890a5243
 +// Test binary request creation per https://www.rfc-editor.org/rfc/rfc9292
 +TEST(OhttpTest, TestBinaryRequest) {
 +  std::vector<uint8_t> request =
-+      ohttp::get_binary_request("/", "ohttp-gateway.jthess.com", "foo");
++      ohttp::get_binary_request("POST", "https", "ohttp-gateway.jthess.com", "/", "foo");
 +  std::vector<uint8_t> expected = {
 +      // Known-Length Request {
 +      //   Framing Indicator (i) = 0,
@@ -896,6 +1575,140 @@ index 0000000000000..ae756890a5243
 +  EXPECT_EQ(request, expected);
 +}
 +
++TEST(OhttpTest, TestBinaryResponse) {
++  std::string response_message = "this is a response";
++  std::vector<uint8_t> response_message_vec = std::vector<uint8_t>(response_message.begin(), response_message.end());
++  std::vector<uint8_t> response = ohttp::get_binary_response(200, response_message_vec);
++  std::vector<uint8_t> expected = {
++    // Known-Length Response {
++    //   Framing Indicator (i) = 1,
++    //   Known-Length Informational Response (..) ...,
++    //   Final Response Control Data (..),
++    //   Known-Length Field Section (..),
++    //   Known-Length Content (..),
++    //   Known-Length Field Section (..),
++    //   Padding (..),
++    // }
++    1,
++
++    // No informational responses in this test.
++    // Known-Length Informational Response {
++    //   Informational Response Control Data (..),
++    //   Known-Length Field Section (..),
++    // }
++
++    // Final Response Control Data {
++    //   Status Code (i) = 200..599,
++    // }
++    200,
++
++    // Known-Length Field Section {
++    //   Length (i),
++    //   Field Line (..) ...,
++    // }
++    0,
++
++    // Known-Length Content {
++    //   Content Length (i),
++    //   Content (..),
++    // }
++    18, // Length of "this is a response"
++    't', 'h', 'i', 's', ' ', 'i', 's', ' ', 'a', ' ', 'r', 'e', 's', 'p', 'o', 'n', 's', 'e',
++
++    // Trailer section.
++    // Known-Length Field Section {
++    //   Length (i),
++    //   Field Line (..) ...,
++    // }
++    0,
++  };
++  EXPECT_EQ(response, expected);
++}
++
++TEST(OhttpTest, EncapsulateAndDecapsulateResponse) {
++  ohttp::OHTTP_HPKE_KEY* test_keypair = getKeys();
++  uint8_t client_enc[ohttp::OHTTP_HPKE_MAX_ENC_LENGTH];
++  size_t client_enc_len;
++  uint8_t pkR[ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH];
++  size_t pkR_len;
++  int rv = ohttp::OHTTP_HPKE_KEY_public_key(
++      test_keypair, pkR, &pkR_len, ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH);
++  EXPECT_EQ(rv, 1);
++
++  ohttp::OHTTP_HPKE_CTX* sender_context = ohttp::createHpkeContext();
++  std::vector<uint8_t> encapsulated_request =
++      ohttp::get_encapsulated_request(
++        sender_context,
++        "POST", "https", "ohttp-gateway.jthess.com", "/", "foo",
++        client_enc,
++        &client_enc_len,
++        pkR,
++        pkR_len);
++  std::cout << std::endl;
++  ohttp::OHTTP_HPKE_CTX* receiver_context = ohttp::createHpkeContext();
++  size_t max_req_out_len = encapsulated_request.size();
++  std::vector<uint8_t> request_bhttp(max_req_out_len);
++  size_t req_out_len;
++  size_t enc_len = 32;
++  u_int8_t enc[enc_len];
++  ohttp::DecapsulationErrorCode rv2 = ohttp::decapsulate_request(
++    receiver_context,
++    encapsulated_request,
++    request_bhttp.data(),
++    &req_out_len,
++    enc,
++    enc_len,
++    max_req_out_len,
++    test_keypair);
++  EXPECT_EQ(rv2, ohttp::DecapsulationErrorCode::SUCCESS);
++
++  // Give a made up response.
++  std::vector<uint8_t> encapsulated_response = ohttp::encapsulate_response(
++    receiver_context,
++    enc,
++    enc_len,
++    200,
++    "this is a response");
++  // Be sure its actually populated; we'll verify contents below.
++  EXPECT_GT(encapsulated_response.size(), size_t(32 + 18));
++
++  // Then decapsulate the response back at the sender.
++  size_t max_resp_out_len = encapsulated_response.size();
++  uint8_t response_bhttp[max_resp_out_len];
++  size_t resp_out_len;
++  ohttp::DecapsulationErrorCode rv3 = ohttp::decapsulate_response(
++    sender_context,
++    client_enc,
++    client_enc_len,
++    encapsulated_response,
++    response_bhttp,
++    &resp_out_len,
++    max_resp_out_len);
++  EXPECT_EQ(rv3, ohttp::DecapsulationErrorCode::SUCCESS);
++
++  EXPECT_EQ(resp_out_len, size_t(23)); // 18 plus the BHTTP encoding
++  EXPECT_EQ(response_bhttp[0], 1);     // Fixed length response
++  EXPECT_EQ(response_bhttp[1], 200);   // Status code (Improperly encoded.  Fix this.)
++}
++
++TEST(OhttpTest, ParseBinaryRequest)
++{
++  std::vector<uint8_t> request =
++      ohttp::get_binary_request("POST", "https", "ohttp-gateway.jthess.com", "/", "foo");
++
++  std::string method = ohttp::get_method_from_binary_request(request);
++  std::string expected_method = "POST";
++  EXPECT_EQ(method, expected_method);
++
++  std::string url = ohttp::get_url_from_binary_request(request);
++  std::string expected_url = "https://ohttp-gateway.jthess.com/";
++  EXPECT_EQ(url, expected_url);
++
++  std::string body = ohttp::get_body_from_binary_request(request);
++  std::string expected_body = "foo";
++  EXPECT_EQ(body, expected_body);
++}
++
 +// Test that encapsulation starts with the correct header.
 +TEST(OhttpTest, TestEncapsulatedRequestHeader) {
 +  // Encapsulation per RFC 9458:
@@ -912,15 +1725,22 @@ index 0000000000000..ae756890a5243
 +  // ct = sctxt.Seal("", request)
 +  // enc_request = concat(hdr, enc, ct)
 +
-+  EVP_HPKE_KEY test_keypair = getKeys();
-+  uint8_t pkR[EVP_HPKE_MAX_PUBLIC_KEY_LENGTH];
++  ohttp::OHTTP_HPKE_KEY* test_keypair = getKeys();
++  uint8_t client_enc[ohttp::OHTTP_HPKE_MAX_ENC_LENGTH];
++  size_t client_enc_len;
++  uint8_t pkR[ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH];
 +  size_t pkR_len;
-+  int rv = EVP_HPKE_KEY_public_key(
-+      &test_keypair, pkR, &pkR_len, EVP_HPKE_MAX_PUBLIC_KEY_LENGTH);
++  int rv = ohttp::OHTTP_HPKE_KEY_public_key(
++      test_keypair, pkR, &pkR_len, ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH);
 +  EXPECT_EQ(rv, 1); // Check if public key retrieval was successful
 +
++  ohttp::OHTTP_HPKE_CTX* sender_context = ohttp::createHpkeContext();
 +  std::vector<uint8_t> request =
-+      ohttp::get_encapsulated_request("/", "ohttp-gateway.jthess.com", "foo", pkR, pkR_len);
++      ohttp::get_encapsulated_request(
++        sender_context, 
++        "POST", "https", "ohttp-gateway.jthess.com", "/", "foo",
++        client_enc, &client_enc_len,
++        pkR, pkR_len);
 +
 +  std::vector<uint8_t> expected_hdr = {
 +      0x80,        // Key ID
@@ -941,45 +1761,72 @@ index 0000000000000..ae756890a5243
 +}
 +
 +TEST(OhttpTest, DecapsulateEmptyRequestFails) {
-+  EVP_HPKE_KEY test_keypair = getKeys();
++  ohttp::OHTTP_HPKE_KEY* test_keypair = getKeys();
 +  size_t pkR_len = 32;
 +  uint8_t pkR[pkR_len];
 +  size_t written;
-+  int rv = EVP_HPKE_KEY_public_key(
-+      &test_keypair, pkR, &written, pkR_len);
++  int rv = ohttp::OHTTP_HPKE_KEY_public_key(
++      test_keypair, pkR, &written, pkR_len);
 +  EXPECT_EQ(rv, 1); // Check if public key retrieval was successful
 +
 +  // Now, decapsulate it with the same keypair
++  ohttp::OHTTP_HPKE_CTX* receiver_context = ohttp::createHpkeContext();
 +  std::vector<uint8_t> empty_request = {};
 +  std::vector<uint8_t> request_bhttp(0);
 +  size_t out_len;
++  size_t enc_len = 32;
++  uint8_t enc[enc_len];
 +  ohttp::DecapsulationErrorCode rv2 = ohttp::decapsulate_request(
-+    empty_request, request_bhttp.data(), &out_len, 0, test_keypair);
++    receiver_context,
++    empty_request,
++    request_bhttp.data(),
++    &out_len,
++    enc,
++    enc_len,
++    0,
++    test_keypair);
 +  EXPECT_EQ(rv2, ohttp::DecapsulationErrorCode::ERR_NO_ENCAPSULATED_HEADER);
 +}
 +
 +// Enc/Decapsulate routrip test
 +TEST(OhttpTest, EncapsulateAndDecapsulateRequest) {
 +  // Recipient keys
-+  EVP_HPKE_KEY test_keypair = getKeys();
-+  uint8_t pkR[EVP_HPKE_MAX_PUBLIC_KEY_LENGTH];
++  ohttp::OHTTP_HPKE_KEY* test_keypair = getKeys();
++  uint8_t client_enc[ohttp::OHTTP_HPKE_MAX_ENC_LENGTH];
++  size_t client_enc_len;
++  uint8_t pkR[ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH];
 +  size_t pkR_len;
-+  int rv = EVP_HPKE_KEY_public_key(
-+      &test_keypair, pkR, &pkR_len, EVP_HPKE_MAX_PUBLIC_KEY_LENGTH);
++  int rv = ohttp::OHTTP_HPKE_KEY_public_key(
++      test_keypair, pkR, &pkR_len, ohttp::OHTTP_HPKE_MAX_PUBLIC_KEY_LENGTH);
 +  EXPECT_EQ(rv, 1); // Check if public key retrieval was successful
 +
 +  // Encapsulate it
++  ohttp::OHTTP_HPKE_CTX* sender_context = ohttp::createHpkeContext();
 +  std::vector<uint8_t> request =
-+      ohttp::get_encapsulated_request("/", "ohttp-gateway.jthess.com", "foo", pkR, pkR_len);
++      ohttp::get_encapsulated_request(
++        sender_context,
++        "POST", "https", "ohttp-gateway.jthess.com", "/", "foo",
++        client_enc, &client_enc_len,
++        pkR, pkR_len);
 +
++  ohttp::OHTTP_HPKE_CTX* receiver_context = ohttp::createHpkeContext();
 +  size_t max_out_len = request.size();
 +  std::vector<uint8_t> request_bhttp(max_out_len);
 +  size_t out_len;
++  size_t enc_len = 32;
++  uint8_t enc[enc_len];
 +  ohttp::DecapsulationErrorCode rv2 = ohttp::decapsulate_request(
-+    request, request_bhttp.data(), &out_len, max_out_len, test_keypair);
++    receiver_context,
++    request,
++    request_bhttp.data(),
++    &out_len,
++    enc,
++    enc_len,
++    max_out_len,
++    test_keypair);
 +  EXPECT_EQ(rv2, ohttp::DecapsulationErrorCode::SUCCESS);
 +
-+  std::vector<uint8_t> expected_bhttp = ohttp::get_binary_request("/", "ohttp-gateway.jthess.com", "foo");
++  std::vector<uint8_t> expected_bhttp = ohttp::get_binary_request("POST", "https", "ohttp-gateway.jthess.com", "/", "foo");
 +  EXPECT_EQ(out_len, expected_bhttp.size());
 +  std::vector<uint8_t> request_bhttp_vec(request_bhttp.data(), request_bhttp.data() + out_len);
 +  EXPECT_EQ(request_bhttp_vec, expected_bhttp);
