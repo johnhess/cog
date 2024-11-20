@@ -588,10 +588,10 @@ index 0000000000000..e0cf6234938bc
 \ No newline at end of file
 diff --git a/third_party/ohttp/ohttp.cc b/third_party/ohttp/ohttp.cc
 new file mode 100644
-index 0000000000000..89690c76ea9d0
+index 0000000000000..b88ca0d3e69e9
 --- /dev/null
 +++ b/third_party/ohttp/ohttp.cc
-@@ -0,0 +1,783 @@
+@@ -0,0 +1,864 @@
 +#include <vector>
 +#include <iostream>
 +#include <stdexcept>
@@ -841,14 +841,96 @@ index 0000000000000..89690c76ea9d0
 +        return binary_request;
 +    }
 +
++    std::vector<uint8_t> get_quic_integer_as_bytes(uint64_t in) {
++        std::vector<uint8_t> encoded;
++
++        if (in <= 63ULL) {
++            encoded.push_back(static_cast<uint8_t>(in | 0b00'000000));
++        } else if (in <= 16383ULL) {
++            encoded.push_back(static_cast<uint8_t>((in >> 8) | 0b01'000000));
++            encoded.push_back(static_cast<uint8_t>(in & 0xFF));
++        } else if (in <= 1073741823ULL) {
++            encoded.push_back(static_cast<uint8_t>((in >> 24) | 0b10'000000));
++            encoded.push_back(static_cast<uint8_t>((in >> 16) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>((in >> 8) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>(in & 0xFF));
++        } else if (in <= 4611686018427387903ULL) {
++            encoded.push_back(static_cast<uint8_t>(((in >> 56) & 0b00111111) | 0b11'000000));
++            encoded.push_back(static_cast<uint8_t>((in >> 48) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>((in >> 40) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>((in >> 32) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>((in >> 24) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>((in >> 16) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>((in >> 8) & 0xFF));
++            encoded.push_back(static_cast<uint8_t>(in & 0xFF));
++        }
++        return encoded;
++    }
++
++    uint64_t get_quic_integer_from_bytes(std::vector<uint8_t>& in) {
++        if (in.size() == 0) {
++            return -1;
++        }
++        uint64_t result = 0;
++        if (in.size() >= 1 && (in[0] & 0b11'000000) == 0b00'000000) {
++            result = in[0] & 0b00'111111;
++            in.erase(in.begin());
++        } else if (in.size() >= 2 && (in[0] & 0b11'000000) == 0b01'000000) {
++            result = (in[0] & 0b00'111111) << 8;
++            result |= in[1];
++            in.erase(in.begin(), in.begin() + 2);
++        } else if (in.size() >= 4 && (in[0] & 0b11'000000) == 0b10'000000) {
++            result = (in[0] & 0b00'111111) << 24;
++            result |= in[1] << 16;
++            result |= in[2] << 8;
++            result |= in[3];
++            in.erase(in.begin(), in.begin() + 4);
++        } else if (in.size() >= 8 && (in[0] & 0b11'000000) == 0b11'000000) {
++            result = static_cast<uint64_t>(in[0] & 0b00'111111) << 56;
++            result |= static_cast<uint64_t>(in[1]) << 48;
++            result |= static_cast<uint64_t>(in[2]) << 40;
++            result |= static_cast<uint64_t>(in[3]) << 32;
++            result |= static_cast<uint64_t>(in[4]) << 24;
++            result |= static_cast<uint64_t>(in[5]) << 16;
++            result |= static_cast<uint64_t>(in[6]) << 8;
++            result |= static_cast<uint64_t>(in[7]);
++            in.erase(in.begin(), in.begin() + 8);
++        } else {
++          return -1;
++        }
++        return result;
++    }
++
 +    std::vector<uint8_t> get_binary_response(const int response_code, const std::vector<uint8_t>& content) {
++      // Known-Length Response {
 +      std::vector<uint8_t> binary_response;
++      //   Framing Indicator (i) = 1,
 +      binary_response.push_back(1); // Known-Length Informational Response
-+      binary_response.push_back(response_code); // Status Code      
-+      binary_response.push_back(0); // Known-Length Field Section Length
-+      binary_response.push_back(content.size()); // Content Length
++      //   Known-Length Informational Response (..) ...,
++      //   Final Response Control Data {
++      //     Status Code (i) = 200..599,
++      std::vector<uint8_t> response_code_bytes = get_quic_integer_as_bytes(uint64_t(response_code));
++      binary_response.insert(binary_response.end(), response_code_bytes.begin(), response_code_bytes.end());   
++      //   }
++      //   Known-Length Field Section {
++      binary_response.push_back(0);
++      //     Length (i),
++      //     Field Line (..) ...,
++      //   }
++      //   Known-Length Content {
++      //     Content Length (i),
++      std::vector<uint8_t> content_size_bytes = get_quic_integer_as_bytes(uint64_t(content.size()));
++      binary_response.insert(binary_response.end(), content_size_bytes.begin(), content_size_bytes.end());
++      //     Content (..),
 +      binary_response.insert(binary_response.end(), content.begin(), content.end());
-+      binary_response.push_back(0); // Trailer section length
++      //   }
++      //   Known-Length Field Section {
++      binary_response.push_back(0);
++      //     Length (i),
++      //     Field Line (..) ...,
++      //   }
++      //   Padding (..),
++      // }
 +      return binary_response;
 +    }
 +
@@ -911,15 +993,21 @@ index 0000000000000..89690c76ea9d0
 +        //   Known-Length Field Section (..),
 +        //   Padding (..),
 +        // }
-+        int offset = 0;
-+        offset += 1; // Skip framing indicator
++        std::vector<uint8_t> consumable_resp(binary_response.size());
++        std::copy(binary_response.begin(), binary_response.end(), consumable_resp.begin());
++        // Skip framing indicator
++        consumable_resp.erase(consumable_resp.begin());
 +        // Assume no informational responses.
-+        offset += 1; // Skip final response control data, assuming it's 1 byte.
-+        offset += 1 + binary_response[offset]; // Skip field section
++        // Get response code
++        (void)get_quic_integer_from_bytes(consumable_resp);
++        // Skip field section
++        uint64_t field_section_length = get_quic_integer_from_bytes(consumable_resp);
++        consumable_resp.erase(consumable_resp.begin(), consumable_resp.begin() + field_section_length);
++        // Get content
++        uint64_t content_length = get_quic_integer_from_bytes(consumable_resp);
 +        std::string body;
-+        size_t body_length = binary_response[offset];
-+        for (size_t i = 1; i <= body_length; i++) {
-+            body.push_back(static_cast<char>(binary_response[offset + i]));
++        for (size_t i = 0; i < content_length; i++) {
++            body.push_back(static_cast<char>(consumable_resp[i]));
 +        }
 +        return body;
 +    }
@@ -939,14 +1027,6 @@ index 0000000000000..89690c76ea9d0
 +        // Hard coded key config matching ohttp-gateway.jthess.com's
 +        // public key.
 +
-+        // Key ID (8 bit)                 80
-+        // HPKE KEM ID (16)               0020 	DHKEM(X25519, HKDF-SHA256)
-+        // HPKE Public Key (8*Npk=8*32)   7a04f3070f2fc4c52c06eb373060b415dbd8e82effe4088965a2602c27b91646
-+        // HPKE Symmetric Algos Len (16)  0004
-+        // HPKE Symmetric algorithms (32) 
-+        //   HPKE KDF ID                  0001 // HKDF-SHA256	
-+        //   HPKE AEAD ID                 0001 // AES-128-GCM	
-+
 +        // Plaintext:
 +        std::vector<uint8_t> binary_request = get_binary_request(method, scheme, host, path, body);
 +
@@ -960,13 +1040,10 @@ index 0000000000000..89690c76ea9d0
 +        }
 +        info.push_back(0);  // Zero byte
 +        // Header
-+        info.push_back(0x80); // Key ID
++        info.push_back(0x00); // Key ID
 +        info.push_back(0x00); info.push_back(0x20); // HPKE KEM ID
 +        info.push_back(0x00); info.push_back(0x01); // KDF ID
 +        info.push_back(0x00); info.push_back(0x01); // AEAD ID
-+
-+        // Ciphertext & Friends:
-+        std::vector<uint8_t> encapsulated_request;  // will be aad + enc + ct
 +
 +        int rv = EVP_HPKE_CTX_setup_sender(
 +            /* *ctx */ sender_context->internal_ctx,
@@ -990,12 +1067,7 @@ index 0000000000000..89690c76ea9d0
 +            EVP_HPKE_CTX_max_overhead(sender_context->internal_ctx);
 +        std::vector<uint8_t> ciphertext(ct_max_len);
 +        size_t ciphertext_len;
-+        std::vector<uint8_t> aad = {
-+            0x80, // Key ID
-+            0x00, 0x20, // HPKE KEM ID
-+            0x00, 0x01, // KDF ID
-+            0x00, 0x01, // AEAD ID
-+        };
++        std::vector<uint8_t> ad = {};
 +        rv = EVP_HPKE_CTX_seal(
 +            /* *ctx */ sender_context->internal_ctx,
 +            /* *out */ ciphertext.data(),
@@ -1003,16 +1075,23 @@ index 0000000000000..89690c76ea9d0
 +            /*  max_out_len */ ciphertext.size(),
 +            /* *in */ binary_request.data(),
 +            /*  in_len */ binary_request.size(),
-+            /* *ad */ aad.data(),
-+            /*  ad_len */ aad.size()
++            /* *ad */ ad.data(),
++            /*  ad_len */ ad.size()
 +        );
 +        if (rv != 1) {
 +            return {};
 +        }
 +
 +        // Per RFC 9292, the encapsulated request is the concatenation of the
-+        // aad, enc, and ciphertext.
-+        encapsulated_request.insert(encapsulated_request.end(), aad.begin(), aad.end());
++        // hdr, enc, and ciphertext.
++        std::vector<uint8_t> hdr = {
++            0x00, // Key ID
++            0x00, 0x20, // HPKE KEM ID
++            0x00, 0x01, // KDF ID
++            0x00, 0x01, // AEAD ID
++        };
++        std::vector<uint8_t> encapsulated_request;
++        encapsulated_request.insert(encapsulated_request.end(), hdr.begin(), hdr.end());
 +        encapsulated_request.insert(encapsulated_request.end(), client_enc, client_enc + *client_enc_len);
 +        encapsulated_request.insert(encapsulated_request.end(), ciphertext.begin(), ciphertext.begin() + ciphertext_len);
 +
@@ -1301,16 +1380,16 @@ index 0000000000000..89690c76ea9d0
 +        size_t max_drequest_len,
 +        OHTTP_HPKE_KEY* recipient_keypair) {
 +
-+      // Break the request into 3 parts: AAD, ephemeral public key, and 
++      // Break the request into 3 parts: hdr, ephemeral public key, and 
 +      // ciphertext.
 +
-+      // The first 7 bytes of the encapsulated request are the aad.
++      // The first 7 bytes of the encapsulated request are the hdr.
 +      if (erequest.size() < 7) {
 +        return DecapsulationErrorCode::ERR_NO_ENCAPSULATED_HEADER;
 +      }
-+      std::vector<uint8_t> ad;
++      std::vector<uint8_t> hdr;
 +      for (size_t i = 0; i < 7; i++) {
-+        ad.push_back(erequest[i]);
++        hdr.push_back(erequest[i]);
 +      }
 +
 +      // The next 32 bytes are the ephemeral public key.
@@ -1339,7 +1418,8 @@ index 0000000000000..89690c76ea9d0
 +      }
 +      info.push_back(0);  // Zero byte
 +      // Header
-+      info.push_back(0x80); // Key ID
++      info.push_back(hdr[0]); // Key ID from header
++      // TODO: Use header to select algorithm.
 +      info.push_back(0x00); info.push_back(0x20); // HPKE KEM ID
 +      info.push_back(0x00); info.push_back(0x01); // KDF ID
 +      info.push_back(0x00); info.push_back(0x01); // AEAD ID
@@ -1358,6 +1438,7 @@ index 0000000000000..89690c76ea9d0
 +        return DecapsulationErrorCode::ERR_NO_CONTEXT_CREATED;
 +      }
 +
++      std::vector<uint8_t> ad = {};
 +      int rv3 = EVP_HPKE_CTX_open(
 +        /* *ctx */ receiver_context->internal_ctx,
 +        /* *out */ drequest,
